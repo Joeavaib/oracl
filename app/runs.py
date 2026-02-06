@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from app.pipelines_registry import get_pipeline, resolve_model_snapshots
+
 
 MAX_PREVIEW_BYTES = 200 * 1024
 
@@ -77,6 +79,11 @@ def _tail_lines(path: Path, limit: int) -> List[str]:
 
 
 def create_stub_run(payload: Dict[str, Any]) -> str:
+    pipeline_id = payload.get("pipeline_id")
+    if not pipeline_id:
+        raise ValueError("pipeline_id is required")
+    pipeline_snapshot = get_pipeline(str(pipeline_id))
+    model_snapshots = resolve_model_snapshots(pipeline_snapshot)
     run_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
     run_path = runs_dir() / run_id
@@ -87,8 +94,14 @@ def create_stub_run(payload: Dict[str, Any]) -> str:
         "user_prompt": payload.get("user_prompt"),
         "repo_root": payload.get("repo_root"),
         "constraints": payload.get("constraints") or [],
+        "pipeline_id": pipeline_snapshot["id"],
     }
     _write_json(run_path / "input.json", input_payload)
+    _write_json(run_path / "pipeline_snapshot.json", pipeline_snapshot)
+    _write_json(
+        run_path / "model_snapshots.json",
+        {"pipeline_id": pipeline_snapshot["id"], "steps": model_snapshots},
+    )
     _write_json(
         run_path / "state_initial.json",
         {
@@ -256,6 +269,8 @@ def get_run_artifacts(run_id: str) -> Dict[str, Any]:
         ),
         "coder_output.json": _file_preview(run_path / "coder_output.json"),
         "state_final.json": _file_preview(run_path / "state_final.json"),
+        "pipeline_snapshot.json": _file_preview(run_path / "pipeline_snapshot.json"),
+        "model_snapshots.json": _file_preview(run_path / "model_snapshots.json"),
     }
     return {
         "run_id": run_id,
@@ -287,6 +302,8 @@ def get_artifact_path(run_id: str, name: str) -> Path:
         "validator_post_planner.json",
         "coder_output.json",
         "state_final.json",
+        "pipeline_snapshot.json",
+        "model_snapshots.json",
         "events.jsonl",
     }
     if name not in allowed:
