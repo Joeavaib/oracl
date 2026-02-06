@@ -8,6 +8,22 @@ from typing import Any, Dict, List, Optional
 
 MODEL_ROLES = {"validator", "planner", "coder"}
 MODEL_PROVIDERS = {"openai-compatible", "vllm", "ollama"}
+VALIDATOR_DECISIONS = {
+    "accept",
+    "retry_same_node",
+    "reroute",
+    "escalate",
+    "abort",
+}
+VALIDATOR_RETRY_STRATEGIES = {
+    "tighten_constraints",
+    "add_missing_input",
+    "reduce_scope",
+    "force_schema",
+    "ask_for_clarification",
+    "tool_verify",
+    "patch_only",
+}
 
 
 def repo_root() -> Path:
@@ -50,6 +66,71 @@ def _validate_required_string(payload: Dict[str, Any], key: str) -> str:
     return value
 
 
+def _validate_optional_int(payload: Dict[str, Any], key: str) -> Optional[int]:
+    if key not in payload:
+        return None
+    value = payload.get(key)
+    if not isinstance(value, int):
+        raise ValueError(f"{key} must be an integer")
+    if value < 0:
+        raise ValueError(f"{key} must be non-negative")
+    return value
+
+
+def _validate_string_list(payload: Dict[str, Any], key: str) -> Optional[List[str]]:
+    if key not in payload:
+        return None
+    value = payload.get(key)
+    if not isinstance(value, list):
+        raise ValueError(f"{key} must be a list of strings")
+    cleaned: List[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{key} must be a list of strings")
+        cleaned.append(item)
+    return cleaned
+
+
+def _validate_validator_config(payload: Dict[str, Any]) -> Dict[str, Any]:
+    config: Dict[str, Any] = {}
+    if "use_llm" in payload:
+        use_llm = payload.get("use_llm")
+        if not isinstance(use_llm, bool):
+            raise ValueError("use_llm must be a boolean")
+        config["use_llm"] = use_llm
+    max_attempts = _validate_optional_int(payload, "max_attempts")
+    if max_attempts is not None:
+        config["max_attempts"] = max_attempts
+    compression_token_budget = _validate_optional_int(payload, "compression_token_budget")
+    if compression_token_budget is not None:
+        config["compression_token_budget"] = compression_token_budget
+    stop_conditions = _validate_string_list(payload, "stop_conditions")
+    if stop_conditions is not None:
+        config["stop_conditions"] = stop_conditions
+    allowed_decisions = _validate_string_list(payload, "allowed_decisions")
+    if allowed_decisions is not None:
+        invalid = sorted(set(allowed_decisions) - VALIDATOR_DECISIONS)
+        if invalid:
+            raise ValueError(f"allowed_decisions must be one of {sorted(VALIDATOR_DECISIONS)}")
+        config["allowed_decisions"] = allowed_decisions
+    allowed_retry_strategies = _validate_string_list(payload, "allowed_retry_strategies")
+    if allowed_retry_strategies is not None:
+        invalid = sorted(set(allowed_retry_strategies) - VALIDATOR_RETRY_STRATEGIES)
+        if invalid:
+            raise ValueError(
+                "allowed_retry_strategies must be one of "
+                f"{sorted(VALIDATOR_RETRY_STRATEGIES)}"
+            )
+        config["allowed_retry_strategies"] = allowed_retry_strategies
+    if "rubric_weights" in payload:
+        rubric_weights = payload.get("rubric_weights")
+        if rubric_weights is not None and not isinstance(rubric_weights, dict):
+            raise ValueError("rubric_weights must be an object")
+        if rubric_weights is not None:
+            config["rubric_weights"] = rubric_weights
+    return config
+
+
 def _validate_model_payload(payload: Dict[str, Any], require_all: bool = True) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Model payload must be a JSON object")
@@ -67,6 +148,14 @@ def _validate_model_payload(payload: Dict[str, Any], require_all: bool = True) -
         raise ValueError(f"role must be one of {sorted(MODEL_ROLES)}")
     if "provider" in data and data["provider"] not in MODEL_PROVIDERS:
         raise ValueError(f"provider must be one of {sorted(MODEL_PROVIDERS)}")
+
+    if "validator_config" in payload:
+        if data.get("role") != "validator":
+            raise ValueError("validator_config is only allowed for validator role")
+        validator_config = _validate_validator_config(payload.get("validator_config") or {})
+        data["validator_config"] = validator_config
+    elif data.get("role") == "validator" and "validator_config" in payload:
+        data["validator_config"] = _validate_validator_config(payload["validator_config"])
 
     if "adapter" in payload:
         data["adapter"] = payload.get("adapter")

@@ -6,7 +6,9 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-def test_ui_smoke(tmp_path, monkeypatch):
+
+
+def test_ui_run_smoke(tmp_path, monkeypatch):
     runs_dir = tmp_path / "runs"
     models_dir = tmp_path / "models"
     pipelines_dir = tmp_path / "pipelines"
@@ -81,8 +83,18 @@ def test_ui_smoke(tmp_path, monkeypatch):
             "pipeline_id": "pipeline",
         },
     )
+    assert response.status_code == 200
+
+
 def test_ui_smoke():
     app = create_app()
     client = TestClient(app)
     response = client.get("/ui")
+    assert response.status_code == 200
+
+
+def test_ui_models_new_page():
+    app = create_app()
+    client = TestClient(app)
+    response = client.get("/ui/models/new")
     assert response.status_code == 200
