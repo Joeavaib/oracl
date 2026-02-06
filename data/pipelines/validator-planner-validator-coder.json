@@ -1,0 +1,26 @@
+{
+  "id": "validator-planner-validator-coder",
+  "description": "Default MVP pipeline: validator → planner → validator → coder",
+  "steps": [
+    {
+      "step": "validator_pre_planner",
+      "role": "validator",
+      "model_id": "validator-default"
+    },
+    {
+      "step": "planner",
+      "role": "planner",
+      "model_id": "planner-default"
+    },
+    {
+      "step": "validator_post_planner",
+      "role": "validator",
+      "model_id": "validator-default"
+    },
+    {
+      "step": "coder",
+      "role": "coder",
+      "model_id": "coder-default"
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Model · Orchestrator{% endblock %}
+
+{% block content %}
+<section class="card">
+  {% if is_new %}
+    <h2>Neues Model</h2>
+  {% else %}
+    <h2>Model: {{ model.id }}</h2>
+  {% endif %}
+
+  {% if error %}
+    <p class="warning">{{ error }}</p>
+  {% endif %}
+  {% if notice %}
+    <p class="hint">{{ notice }}</p>
+  {% endif %}
+
+  <form method="post" action="{% if is_new %}/ui/models{% else %}/ui/models/{{ model.id }}{% endif %}" class="stack">
+    <label>
+      Model ID
+      {% if is_new %}
+        <input type="text" name="model_id" value="{{ model.id }}" required />
+      {% else %}
+        <input type="text" name="model_id" value="{{ model.id }}" readonly />
+      {% endif %}
+    </label>
+    <label>
+      Role
+      <select name="role" required>
+        <option value="" {% if not model.role %}selected{% endif %}>Bitte wählen</option>
+        {% for role in roles %}
+          <option value="{{ role }}" {% if model.role == role %}selected{% endif %}>{{ role }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      Provider
+      <input type="text" name="provider" value="{{ model.provider or "" }}" required />
+    </label>
+    <label>
+      Model Name
+      <input type="text" name="model_name" value="{{ model.model_name or "" }}" required />
+    </label>
+    <label>
+      Base URL
+      <input type="text" name="base_url" value="{{ model.base_url or "" }}" required />
+    </label>
+    <label>
+      Prompt Profile
+      <textarea name="prompt_profile" rows="6" required>{{ model.prompt_profile or "" }}</textarea>
+    </label>
+    <label>
+      Adapter (optional metadata)
+      <textarea name="adapter" rows="3" placeholder='{"notes": "..."}'>{{ model.adapter or "" }}</textarea>
+    </label>
+
+    <div class="actions">
+      <button type="submit" class="primary">Speichern</button>
+      <a class="button" href="/ui/models">Zurück</a>
+    </div>
+  </form>
+
+  {% if not is_new %}
+  <form method="post" action="/ui/models/{{ model.id }}/test" class="actions">
+    <button type="submit" class="button">Dry-Run Test</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,11 +1,25 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from app.models_registry import (
+    MODEL_ROLES,
+    create_model,
+    delete_model,
+    get_model,
+    list_models,
+    update_model,
+)
+from app.pipelines_registry import (
+    create_pipeline,
+    get_pipeline,
+    list_pipelines,
+    update_pipeline,
+)
 from app.runs import (
     MAX_PREVIEW_BYTES,
     create_stub_run,
@@ -21,12 +35,223 @@ router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
 
+def _pipeline_steps_from_form(form: Dict[str, Any]) -> List[Dict[str, Any]]:
+    indices = set()
+    for key in form:
+        if key.startswith(("step_", "role_", "model_id_")):
+            try:
+                indices.add(int(key.rsplit("_", 1)[1]))
+            except (ValueError, IndexError):
+                continue
+    steps: List[Dict[str, Any]] = []
+    for index in sorted(indices):
+        step_name = str(form.get(f"step_{index}") or "").strip()
+        role = str(form.get(f"role_{index}") or "").strip()
+        model_id = str(form.get(f"model_id_{index}") or "").strip()
+        if not any([step_name, role, model_id]):
+            continue
+        steps.append(
+            {
+                "step": step_name or None,
+                "role": role or None,
+                "model_id": model_id or None,
+            }
+        )
+    return steps
+
+
+def _pipeline_form_context(pipeline: Dict[str, Any], is_new: bool, error: Optional[str] = None) -> Dict[str, Any]:
+    steps = list(pipeline.get("steps", []))
+    steps.append({"step": "", "role": "", "model_id": ""})
+    return {
+        "pipeline": pipeline,
+        "steps": steps,
+        "is_new": is_new,
+        "error": error,
+    }
+
+
+def _model_form_context(
+    model: Dict[str, Any],
+    is_new: bool,
+    error: Optional[str] = None,
+    notice: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "model": model,
+        "is_new": is_new,
+        "error": error,
+        "notice": notice,
+        "roles": sorted(MODEL_ROLES),
+    }
+
+
+def _dashboard_context(pipeline_id: Optional[str] = None, error: Optional[str] = None) -> Dict[str, Any]:
+    return {
+        "pipelines": list_pipelines(),
+        "pipeline_id": pipeline_id or "",
+        "error": error,
+        "max_preview_kb": MAX_PREVIEW_BYTES // 1024,
+    }
+
+
 @router.get("/ui", response_class=HTMLResponse)
 async def dashboard(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         "dashboard.html",
-        {"request": request, "max_preview_kb": MAX_PREVIEW_BYTES // 1024},
+        {"request": request, **_dashboard_context()},
     )
+
+
+@router.get("/ui/pipelines", response_class=HTMLResponse)
+async def pipelines_list(request: Request) -> HTMLResponse:
+    pipelines = list_pipelines()
+    return templates.TemplateResponse(
+        "pipelines.html",
+        {"request": request, "pipelines": pipelines},
+    )
+
+
+@router.get("/ui/pipelines/new", response_class=HTMLResponse)
+async def pipeline_new(request: Request) -> HTMLResponse:
+    pipeline: Dict[str, Any] = {"id": "", "description": "", "steps": []}
+    context = _pipeline_form_context(pipeline, is_new=True)
+    context["request"] = request
+    return templates.TemplateResponse("pipeline_detail.html", context)
+
+
+@router.get("/ui/pipelines/{pipeline_id}", response_class=HTMLResponse)
+async def pipeline_detail(request: Request, pipeline_id: str) -> HTMLResponse:
+    try:
+        pipeline = get_pipeline(pipeline_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    context = _pipeline_form_context(pipeline, is_new=False)
+    context["request"] = request
+    return templates.TemplateResponse("pipeline_detail.html", context)
+
+
+@router.get("/ui/models", response_class=HTMLResponse)
+async def models_list(request: Request) -> HTMLResponse:
+    models = list_models()
+    return templates.TemplateResponse(
+        "models.html",
+        {"request": request, "models": models},
+    )
+
+
+@router.get("/ui/models/new", response_class=HTMLResponse)
+async def model_new(request: Request) -> HTMLResponse:
+    model: Dict[str, Any] = {
+        "id": "",
+        "role": "",
+        "provider": "",
+        "model_name": "",
+        "base_url": "",
+        "prompt_profile": "",
+        "adapter": "",
+    }
+    context = _model_form_context(model, is_new=True)
+    context["request"] = request
+    return templates.TemplateResponse("model_detail.html", context)
+
+
+@router.get("/ui/models/{model_id}", response_class=HTMLResponse)
+async def model_detail(request: Request, model_id: str) -> HTMLResponse:
+    try:
+        model = get_model(model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    context = _model_form_context(model, is_new=False)
+    context["request"] = request
+    return templates.TemplateResponse("model_detail.html", context)
+
+
+@router.post("/ui/models")
+async def model_create(request: Request) -> HTMLResponse:
+    form = await request.form()
+    payload = {
+        "id": form.get("model_id"),
+        "role": form.get("role"),
+        "provider": form.get("provider"),
+        "model_name": form.get("model_name"),
+        "base_url": form.get("base_url"),
+        "prompt_profile": form.get("prompt_profile"),
+        "adapter": form.get("adapter") or None,
+    }
+    try:
+        model = create_model(payload)
+    except ValueError as exc:
+        context = _model_form_context(payload, is_new=True, error=str(exc))
+        context["request"] = request
+        return templates.TemplateResponse("model_detail.html", context, status_code=400)
+    return RedirectResponse(url=f"/ui/models/{model['id']}", status_code=303)
+
+
+@router.post("/ui/models/{model_id}")
+async def model_update(request: Request, model_id: str) -> HTMLResponse:
+    form = await request.form()
+    payload = {
+        "id": model_id,
+        "role": form.get("role"),
+        "provider": form.get("provider"),
+        "model_name": form.get("model_name"),
+        "base_url": form.get("base_url"),
+        "prompt_profile": form.get("prompt_profile"),
+        "adapter": form.get("adapter") or None,
+    }
+    try:
+        model = update_model(model_id, payload)
+    except ValueError as exc:
+        context = _model_form_context(payload, is_new=False, error=str(exc))
+        context["request"] = request
+        return templates.TemplateResponse("model_detail.html", context, status_code=400)
+    return RedirectResponse(url=f"/ui/models/{model['id']}", status_code=303)
+
+
+@router.post("/ui/models/{model_id}/test")
+async def model_test(request: Request, model_id: str) -> HTMLResponse:
+    try:
+        model = get_model(model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    context = _model_form_context(model, is_new=False, notice="Dry-run erfolgreich. Keine Inferenz ausgeführt.")
+    context["request"] = request
+    return templates.TemplateResponse("model_detail.html", context)
+
+
+@router.post("/ui/pipelines")
+async def pipeline_create(request: Request) -> HTMLResponse:
+    form = await request.form()
+    payload = {
+        "id": form.get("pipeline_id"),
+        "description": form.get("description") or "",
+        "steps": _pipeline_steps_from_form(form),
+    }
+    try:
+        pipeline = create_pipeline(payload)
+    except ValueError as exc:
+        context = _pipeline_form_context(payload, is_new=True, error=str(exc))
+        context["request"] = request
+        return templates.TemplateResponse("pipeline_detail.html", context, status_code=400)
+    return RedirectResponse(url=f"/ui/pipelines/{pipeline['id']}", status_code=303)
+
+
+@router.post("/ui/pipelines/{pipeline_id}")
+async def pipeline_update(request: Request, pipeline_id: str) -> HTMLResponse:
+    form = await request.form()
+    payload = {
+        "id": pipeline_id,
+        "description": form.get("description") or "",
+        "steps": _pipeline_steps_from_form(form),
+    }
+    try:
+        pipeline = update_pipeline(pipeline_id, payload)
+    except ValueError as exc:
+        context = _pipeline_form_context(payload, is_new=False, error=str(exc))
+        context["request"] = request
+        return templates.TemplateResponse("pipeline_detail.html", context, status_code=400)
+    return RedirectResponse(url=f"/ui/pipelines/{pipeline['id']}", status_code=303)
 
 
 @router.get("/ui/runs", response_class=HTMLResponse)
@@ -79,13 +304,27 @@ async def create_run(request: Request) -> Any:
             "goal": form.get("goal"),
             "user_prompt": form.get("user_prompt"),
             "repo_root": form.get("repo_root"),
+            "pipeline_id": form.get("pipeline_id"),
             "constraints": [
                 item.strip()
                 for item in str(form.get("constraints", "")).split("\n")
                 if item.strip()
             ],
         }
-    run_id = create_stub_run(payload)
+    try:
+        run_id = create_stub_run(payload)
+    except ValueError as exc:
+        accepts_html = "text/html" in request.headers.get("accept", "")
+        if accepts_html or not request.headers.get("content-type", "").startswith(
+            "application/json"
+        ):
+            context = _dashboard_context(
+                pipeline_id=str(payload.get("pipeline_id") or ""),
+                error=str(exc),
+            )
+            context["request"] = request
+            return templates.TemplateResponse("dashboard.html", context, status_code=400)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     accepts_html = "text/html" in request.headers.get("accept", "")
     if accepts_html or not request.headers.get("content-type", "").startswith(
         "application/json"
@@ -128,3 +367,43 @@ async def api_run_artifact(run_id: str, name: str) -> Any:
         "name": name,
         "content": path.read_text(encoding="utf-8", errors="replace"),
     }
+
+
+@router.post("/api/models")
+async def api_create_model(request: Request) -> Dict[str, Any]:
+    payload = await request.json()
+    try:
+        return create_model(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/models")
+async def api_list_models() -> Dict[str, Any]:
+    return {"models": list_models()}
+
+
+@router.get("/api/models/{model_id}")
+async def api_get_model(model_id: str) -> Dict[str, Any]:
+    try:
+        return get_model(model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put("/api/models/{model_id}")
+async def api_update_model(model_id: str, request: Request) -> Dict[str, Any]:
+    payload = await request.json()
+    try:
+        return update_model(model_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/api/models/{model_id}")
+async def api_delete_model(model_id: str) -> Dict[str, Any]:
+    try:
+        delete_model(model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"deleted": model_id}

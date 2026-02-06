@@ -1,0 +1,11 @@
+{
+  "id": "validator-default",
+  "role": "validator",
+  "provider": "openai-compatible",
+  "model_name": "gpt-4o-mini",
+  "base_url": "https://example.com/v1",
+  "prompt_profile": "You are a careful validator.",
+  "adapter": {
+    "notes": "placeholder model config"
+  }
+}

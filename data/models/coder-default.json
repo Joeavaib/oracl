@@ -1,0 +1,11 @@
+{
+  "id": "coder-default",
+  "role": "coder",
+  "provider": "openai-compatible",
+  "model_name": "gpt-4o-mini",
+  "base_url": "https://example.com/v1",
+  "prompt_profile": "You are a careful coder.",
+  "adapter": {
+    "notes": "placeholder model config"
+  }
+}

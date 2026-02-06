@@ -5,6 +5,9 @@
 {% block content %}
 <section class="card">
   <h2>Neuen Run starten</h2>
+  {% if error %}
+    <p class="warning">{{ error }}</p>
+  {% endif %}
   <form method="post" action="/api/runs" class="stack">
     <label>
       Task Goal
@@ -17,6 +20,17 @@
     <label>
       Repo Root (optional)
       <input type="text" name="repo_root" placeholder="/workspace/oracl" />
+    </label>
+    <label>
+      Pipeline ID
+      <select name="pipeline_id" required>
+        <option value="" {% if not pipeline_id %}selected{% endif %}>Bitte wählen</option>
+        {% for pipeline in pipelines %}
+          <option value="{{ pipeline.id }}" {% if pipeline_id == pipeline.id %}selected{% endif %}>
+            {{ pipeline.id }}
+          </option>
+        {% endfor %}
+      </select>
     </label>
     <label>
       Constraints (optional, eine pro Zeile)
