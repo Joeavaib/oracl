@@ -1,18 +1,10 @@
 from __future__ import annotations
 
 import json
-
 from datetime import datetime, timezone
 import urllib.error
 import urllib.parse
 import urllib.request
-
-
-from datetime import datetime, timezone
-import urllib.error
-import urllib.parse
-
-
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Form, HTTPException, Request
@@ -41,7 +33,6 @@ from app.pipelines import (
     get_pipeline as get_api_pipeline,
     list_pipelines as list_api_pipelines,
     save_pipeline,
-
 )
 from app.runs import (
     MAX_PREVIEW_BYTES,
@@ -116,83 +107,7 @@ def _model_form_context(
         "notice": notice,
         "roles": sorted(MODEL_ROLES),
         "models_by_role": models_by_role,
-
     }
-
-
-def _parse_list_field(value: Optional[str]) -> List[str]:
-    if value is None:
-        return []
-    return [item.strip() for item in str(value).splitlines() if item.strip()]
-
-
-def _parse_validator_config(form: Dict[str, Any]) -> Dict[str, Any]:
-    config: Dict[str, Any] = {}
-    config["use_llm"] = form.get("validator_use_llm") == "on"
-    max_attempts = form.get("validator_max_attempts")
-    if max_attempts:
-        config["max_attempts"] = int(max_attempts)
-    stop_conditions = _parse_list_field(form.get("validator_stop_conditions"))
-    if stop_conditions:
-        config["stop_conditions"] = stop_conditions
-    allowed_decisions = _parse_list_field(form.get("validator_allowed_decisions"))
-    if allowed_decisions:
-        config["allowed_decisions"] = allowed_decisions
-    allowed_retry_strategies = _parse_list_field(form.get("validator_allowed_retry_strategies"))
-    if allowed_retry_strategies:
-        config["allowed_retry_strategies"] = allowed_retry_strategies
-    rubric_weights = form.get("validator_rubric_weights")
-    if rubric_weights:
-        config["rubric_weights"] = json.loads(rubric_weights)
-    compression_token_budget = form.get("validator_compression_token_budget")
-    if compression_token_budget:
-        config["compression_token_budget"] = int(compression_token_budget)
-    return config
-
-
-  codex/add-validator-module-with-pydantic-models
-def _normalize_vllm_base_url(base_url: str) -> str:
-    if not isinstance(base_url, str) or not base_url.strip():
-        raise ValueError("base_url is required")
-    parsed = urllib.parse.urlparse(base_url.strip())
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("base_url must include scheme and host")
-    path = parsed.path.rstrip("/")
-    if path in ("", "/v1"):
-        normalized_path = "/v1"
-    else:
-        raise ValueError("base_url must end with /v1 or omit path")
-    return urllib.parse.urlunparse(
-        (parsed.scheme, parsed.netloc, normalized_path, "", "", "")
-    )
-
-
-def _fetch_vllm_models(normalized_base_url: str) -> List[str]:
-    url = f"{normalized_base_url}/models"
-    request = urllib.request.Request(url, method="GET")
-    with urllib.request.urlopen(request, timeout=10) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    data = payload.get("data")
-    if not isinstance(data, list):
-        raise ValueError("Invalid vLLM response")
-    return [
-        item["id"]
-        for item in data
-        if isinstance(item, dict) and isinstance(item.get("id"), str)
-    ]
-
-
-def _get_cached_vllm_models(normalized_base_url: str) -> List[str]:
-    now = datetime.now(timezone.utc).timestamp()
-    cached = _VLLM_DISCOVERY_CACHE.get(normalized_base_url)
-    if cached and (now - cached["timestamp"] <= _VLLM_DISCOVERY_TTL_S):
-        return cached["models"]
-    models = _fetch_vllm_models(normalized_base_url)
-    _VLLM_DISCOVERY_CACHE[normalized_base_url] = {
-        "timestamp": now,
-        "models": models,
-    }
-    return models
 
 
 def _parse_list_field(value: Optional[str]) -> List[str]:
@@ -604,8 +519,6 @@ async def api_run_artifact(run_id: str, name: str) -> Any:
         "content": path.read_text(encoding="utf-8", errors="replace"),
     }
 
-
-
 @router.post("/api/models")
 async def api_create_model(request: Request) -> Dict[str, Any]:
     payload = await request.json()
@@ -626,6 +539,7 @@ async def api_get_model(model_id: str) -> Dict[str, Any]:
         return get_model(model_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
 
 @router.get("/api/pipelines")
 async def api_pipelines() -> Dict[str, Any]:
@@ -651,8 +565,6 @@ async def api_get_pipeline(pipeline_id: str) -> Dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-
-
 @router.put("/api/models/{model_id}")
 async def api_update_model(model_id: str, request: Request) -> Dict[str, Any]:
     payload = await request.json()
@@ -669,6 +581,8 @@ async def api_delete_model(model_id: str) -> Dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"deleted": model_id}
+
+
 @router.put("/api/pipelines/{pipeline_id}")
 async def api_put_pipeline(pipeline_id: str, request: Request) -> Dict[str, Any]:
     payload = await request.json()
