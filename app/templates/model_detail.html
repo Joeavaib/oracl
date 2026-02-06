@@ -35,14 +35,46 @@
         {% endfor %}
       </select>
     </label>
+    {% if model.role %}
+      {% set suggestions = models_by_role.get(model.role) or [] %}
+      {% if suggestions %}
+        <p class="hint">Vorhandene Modelle für {{ model.role }}: {{ suggestions | join(", ") }}</p>
+      {% endif %}
+    {% endif %}
     <label>
       Provider
       <input type="text" name="provider" value="{{ model.provider or "" }}" required />
     </label>
     <label>
       Model Name
-      <input type="text" name="model_name" value="{{ model.model_name or "" }}" required />
+      <input type="text" name="model_name" value="{{ model.model_name or "" }}" list="vllm-models" required />
     </label>
+    <div class="stack">
+      <button
+        type="button"
+        class="button"
+        hx-get="/ui/models/discover/vllm"
+        hx-include="[name='base_url']"
+        hx-target="#vllm-models-container"
+        hx-swap="innerHTML"
+      >
+        Modelle abrufen
+      </button>
+      <button
+        type="button"
+        class="button"
+        hx-get="/ui/models/discover/vllm_test"
+        hx-include="[name='base_url']"
+        hx-target="#vllm-connection-status"
+        hx-swap="innerHTML"
+      >
+        Test connection
+      </button>
+      <div id="vllm-connection-status"></div>
+      <div id="vllm-models-container">
+        <datalist id="vllm-models"></datalist>
+      </div>
+    </div>
     <label>
       Base URL
       <input type="text" name="base_url" value="{{ model.base_url or "" }}" required />
@@ -55,6 +87,41 @@
       Adapter (optional metadata)
       <textarea name="adapter" rows="3" placeholder='{"notes": "..."}'>{{ model.adapter or "" }}</textarea>
     </label>
+
+    {% if model.role == "validator" %}
+      {% set config = model.validator_config or {} %}
+      <fieldset class="stack">
+        <legend>Validator Config</legend>
+        <label>
+          <input type="checkbox" name="validator_use_llm" {% if config.use_llm %}checked{% endif %} />
+          Use LLM runtime
+        </label>
+        <label>
+          Max Attempts
+          <input type="number" name="validator_max_attempts" min="0" value="{{ config.max_attempts or "" }}" />
+        </label>
+        <label>
+          Compression Token Budget
+          <input type="number" name="validator_compression_token_budget" min="0" value="{{ config.compression_token_budget or "" }}" />
+        </label>
+        <label>
+          Stop Conditions (one per line)
+          <textarea name="validator_stop_conditions" rows="3">{{ config.stop_conditions | join('\n') if config.stop_conditions else "" }}</textarea>
+        </label>
+        <label>
+          Allowed Decisions (one per line)
+          <textarea name="validator_allowed_decisions" rows="4">{{ config.allowed_decisions | join('\n') if config.allowed_decisions else "" }}</textarea>
+        </label>
+        <label>
+          Allowed Retry Strategies (one per line)
+          <textarea name="validator_allowed_retry_strategies" rows="4">{{ config.allowed_retry_strategies | join('\n') if config.allowed_retry_strategies else "" }}</textarea>
+        </label>
+        <label>
+          Rubric Weights (JSON)
+          <textarea name="validator_rubric_weights" rows="3" placeholder='{"correctness": 0.4}'>{{ config.rubric_weights | tojson if config.rubric_weights else "" }}</textarea>
+        </label>
+      </fieldset>
+    {% endif %}
 
     <div class="actions">
       <button type="submit" class="primary">Speichern</button>
