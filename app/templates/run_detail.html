@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Run {{ run.run_id }} · Orchestrator{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>Run {{ run.run_id }}</h2>
+  <div class="meta">
+    <div><strong>Created:</strong> {{ run.created_at }}</div>
+    <div><strong>Status:</strong> <span class="status {{ run.status }}">{{ run.status }}</span></div>
+    <div><strong>Letzte Stage:</strong> {{ run.last_stage }}</div>
+  </div>
+  <div class="actions">
+    <a class="button" href="/api/runs/{{ run.run_id }}">API JSON</a>
+    <a class="button" href="/api/runs/{{ run.run_id }}/events">Events JSON</a>
+  </div>
+</section>
+
+<section class="card">
+  <h3>Artefakte</h3>
+  <p class="hint">Vorschauen sind auf {{ max_preview_kb }} KB begrenzt. Für große Dateien den Download verwenden.</p>
+  {% for name, artifact in run.artifacts.items() %}
+  <div class="artifact">
+    <div class="artifact-header">
+      <h4>{{ name }}</h4>
+      <a class="button" href="/api/runs/{{ run.run_id }}/artifact?name={{ name }}">Download</a>
+    </div>
+    {% if artifact.exists %}
+      {% if artifact.truncated %}
+      <p class="warning">Vorschau gekürzt ({{ artifact.size }} bytes).</p>
+      {% endif %}
+      <pre class="code">{{ artifact.content }}</pre>
+    {% else %}
+      <p>Keine Datei vorhanden.</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+<section
+  class="card"
+  hx-get="/ui/runs/{{ run.run_id }}/events?tail=200"
+  hx-trigger="load, every 2s"
+  hx-swap="innerHTML"
+>
+  {% include "partials/events.html" %}
+</section>
+{% endblock %}

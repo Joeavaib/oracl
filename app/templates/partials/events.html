@@ -1,0 +1,12 @@
+<div class="events">
+  <div class="events-header">
+    <h3>Events (tail {{ events.tail }})</h3>
+    <a class="button" href="/api/runs/{{ events.run_id }}/artifact?name=events.jsonl">Download events.jsonl</a>
+  </div>
+  {% if events.events %}
+  <pre class="code">{% for line in events.events %}{{ line }}
+{% endfor %}</pre>
+  {% else %}
+  <p>Keine Events vorhanden.</p>
+  {% endif %}
+</div>
