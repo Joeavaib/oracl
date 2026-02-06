@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard · Orchestrator{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>Neuen Run starten</h2>
+  <form method="post" action="/api/runs" class="stack">
+    <label>
+      Task Goal
+      <input type="text" name="goal" placeholder="Ziel beschreiben" required />
+    </label>
+    <label>
+      User Prompt
+      <textarea name="user_prompt" rows="5" placeholder="Aufgabe beschreiben" required></textarea>
+    </label>
+    <label>
+      Repo Root (optional)
+      <input type="text" name="repo_root" placeholder="/workspace/oracl" />
+    </label>
+    <label>
+      Constraints (optional, eine pro Zeile)
+      <textarea name="constraints" rows="3" placeholder="z.B. keine großen Refactors"></textarea>
+    </label>
+    <button type="submit" class="primary">Run starten</button>
+  </form>
+  <p class="hint">
+    Der Run wird gespeichert und kann später über <a href="/ui/runs">Runs</a>
+    eingesehen werden. Vorschauen sind auf {{ max_preview_kb }} KB begrenzt.
+  </p>
+</section>
+{% endblock %}

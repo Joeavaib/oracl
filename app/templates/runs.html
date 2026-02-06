@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Runs · Orchestrator{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>Letzte Runs</h2>
+  {% if runs %}
+  <table class="runs-table">
+    <thead>
+      <tr>
+        <th>Run ID</th>
+        <th>Created</th>
+        <th>Status</th>
+        <th>Letzte Stage</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for run in runs %}
+      <tr>
+        <td><a href="/ui/runs/{{ run.run_id }}">{{ run.run_id }}</a></td>
+        <td>{{ run.created_at }}</td>
+        <td><span class="status {{ run.status }}">{{ run.status }}</span></td>
+        <td>{{ run.last_stage }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Noch keine Runs vorhanden.</p>
+  {% endif %}
+</section>
+{% endblock %}

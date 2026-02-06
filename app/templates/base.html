@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Orchestrator UI{% endblock %}</title>
+    <link rel="stylesheet" href="/static/app.css" />
+    <script
+      src="https://unpkg.com/htmx.org@1.9.12"
+      integrity="sha384-8MdCOrfT2ie9zzjb1JyF4eF2j3LrJz3vU9rW3M8Z+Jt2CLfN4o3l8XvT0C3L2u2k"
+      crossorigin="anonymous"
+    ></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <h1>Backend-Orchester</h1>
+        <nav>
+          <a href="/ui">Dashboard</a>
+          <a href="/ui/runs">Runs</a>
+        </nav>
+      </div>
+    </header>
+    <main class="container">{% block content %}{% endblock %}</main>
+  </body>
+</html>
