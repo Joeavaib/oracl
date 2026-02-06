@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Models · Orchestrator{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>Models</h2>
+  <p><a class="button" href="/ui/models/new">Neues Model</a></p>
+  {% if models %}
+    <table class="runs-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Role</th>
+          <th>Provider</th>
+          <th>Model Name</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for model in models %}
+        <tr>
+          <td><a href="/ui/models/{{ model.id }}">{{ model.id }}</a></td>
+          <td>{{ model.role }}</td>
+          <td>{{ model.provider }}</td>
+          <td>{{ model.model_name }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="hint">Noch keine Modelle vorhanden.</p>
+  {% endif %}
+</section>
+{% endblock %}

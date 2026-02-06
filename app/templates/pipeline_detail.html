@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Pipeline · Orchestrator{% endblock %}
+
+{% block content %}
+<section class="card">
+  {% if is_new %}
+    <h2>Neue Pipeline</h2>
+  {% else %}
+    <h2>Pipeline: {{ pipeline.id }}</h2>
+  {% endif %}
+
+  {% if error %}
+    <p class="warning">{{ error }}</p>
+  {% endif %}
+
+  <form method="post" action="{% if is_new %}/ui/pipelines{% else %}/ui/pipelines/{{ pipeline.id }}{% endif %}" class="stack">
+    <label>
+      Pipeline ID
+      {% if is_new %}
+        <input type="text" name="pipeline_id" value="{{ pipeline.id }}" required />
+      {% else %}
+        <input type="text" name="pipeline_id" value="{{ pipeline.id }}" readonly />
+      {% endif %}
+    </label>
+    <label>
+      Beschreibung
+      <input type="text" name="description" value="{{ pipeline.description or \"\" }}" />
+    </label>
+
+    <div>
+      <h3>Steps</h3>
+      <table class="runs-table">
+        <thead>
+          <tr>
+            <th>Step</th>
+            <th>Role</th>
+            <th>Model ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for step in steps %}
+          <tr>
+            <td>
+              <input type="text" name="step_{{ loop.index0 }}" value="{{ step.step or \"\" }}" />
+            </td>
+            <td>
+              <input type="text" name="role_{{ loop.index0 }}" value="{{ step.role or \"\" }}" />
+            </td>
+            <td>
+              <input type="text" name="model_id_{{ loop.index0 }}" value="{{ step.model_id or \"\" }}" />
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="hint">Leere Zeilen werden ignoriert. Fügt weitere Steps hinzu, indem ihr eine neue Zeile ausfüllt.</p>
+    </div>
+
+    <div class="actions">
+      <button type="submit" class="primary">Speichern</button>
+      <a class="button" href="/ui/pipelines">Zurück</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

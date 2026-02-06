@@ -1,0 +1,11 @@
+{
+  "id": "planner-default",
+  "role": "planner",
+  "provider": "openai-compatible",
+  "model_name": "gpt-4o-mini",
+  "base_url": "https://example.com/v1",
+  "prompt_profile": "You are a structured planner.",
+  "adapter": {
+    "notes": "placeholder model config"
+  }
+}

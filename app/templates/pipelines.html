@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Pipelines · Orchestrator{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>Pipelines</h2>
+  <p><a class="button" href="/ui/pipelines/new">Neue Pipeline</a></p>
+  {% if pipelines %}
+    <table class="runs-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Beschreibung</th>
+          <th>Steps</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pipeline in pipelines %}
+        <tr>
+          <td><a href="/ui/pipelines/{{ pipeline.id }}">{{ pipeline.id }}</a></td>
+          <td>{{ pipeline.description or "-" }}</td>
+          <td>{{ pipeline.steps | length }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="hint">Noch keine Pipelines vorhanden.</p>
+  {% endif %}
+</section>
+{% endblock %}
