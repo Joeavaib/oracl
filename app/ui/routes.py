@@ -113,6 +113,11 @@ async def dashboard(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/", response_class=HTMLResponse)
+async def root(request: Request) -> HTMLResponse:
+    return RedirectResponse(url="/ui")
+
+
 @router.get("/ui/pipelines", response_class=HTMLResponse)
 async def pipelines_list(request: Request) -> HTMLResponse:
     pipelines = list_registry_pipelines()
