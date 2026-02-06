@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+
 from datetime import datetime, timezone
 import urllib.error
 import urllib.parse
-import urllib.request
+
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Form, HTTPException, Request
@@ -141,6 +142,7 @@ def _parse_validator_config(form: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
+  codex/add-validator-module-with-pydantic-models
 def _normalize_vllm_base_url(base_url: str) -> str:
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("base_url is required")
