@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Form, HTTPException, Request
@@ -94,6 +95,36 @@ def _model_form_context(
         "notice": notice,
         "roles": sorted(MODEL_ROLES),
     }
+
+
+def _parse_list_field(value: Optional[str]) -> List[str]:
+    if value is None:
+        return []
+    return [item.strip() for item in str(value).splitlines() if item.strip()]
+
+
+def _parse_validator_config(form: Dict[str, Any]) -> Dict[str, Any]:
+    config: Dict[str, Any] = {}
+    config["use_llm"] = form.get("validator_use_llm") == "on"
+    max_attempts = form.get("validator_max_attempts")
+    if max_attempts:
+        config["max_attempts"] = int(max_attempts)
+    stop_conditions = _parse_list_field(form.get("validator_stop_conditions"))
+    if stop_conditions:
+        config["stop_conditions"] = stop_conditions
+    allowed_decisions = _parse_list_field(form.get("validator_allowed_decisions"))
+    if allowed_decisions:
+        config["allowed_decisions"] = allowed_decisions
+    allowed_retry_strategies = _parse_list_field(form.get("validator_allowed_retry_strategies"))
+    if allowed_retry_strategies:
+        config["allowed_retry_strategies"] = allowed_retry_strategies
+    rubric_weights = form.get("validator_rubric_weights")
+    if rubric_weights:
+        config["rubric_weights"] = json.loads(rubric_weights)
+    compression_token_budget = form.get("validator_compression_token_budget")
+    if compression_token_budget:
+        config["compression_token_budget"] = int(compression_token_budget)
+    return config
 
 
 def _dashboard_context(pipeline_id: Optional[str] = None, error: Optional[str] = None) -> Dict[str, Any]:
@@ -195,6 +226,13 @@ async def model_create(request: Request) -> HTMLResponse:
         "adapter": form.get("adapter") or None,
     }
     try:
+        if payload["role"] == "validator":
+            payload["validator_config"] = _parse_validator_config(form)
+    except (ValueError, json.JSONDecodeError) as exc:
+        context = _model_form_context(payload, is_new=True, error=str(exc))
+        context["request"] = request
+        return templates.TemplateResponse("model_detail.html", context, status_code=400)
+    try:
         model = create_model(payload)
     except ValueError as exc:
         context = _model_form_context(payload, is_new=True, error=str(exc))
@@ -215,6 +253,13 @@ async def model_update(request: Request, model_id: str) -> HTMLResponse:
         "prompt_profile": form.get("prompt_profile"),
         "adapter": form.get("adapter") or None,
     }
+    try:
+        if payload["role"] == "validator":
+            payload["validator_config"] = _parse_validator_config(form)
+    except (ValueError, json.JSONDecodeError) as exc:
+        context = _model_form_context(payload, is_new=False, error=str(exc))
+        context["request"] = request
+        return templates.TemplateResponse("model_detail.html", context, status_code=400)
     try:
         model = update_model(model_id, payload)
     except ValueError as exc:

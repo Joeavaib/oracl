@@ -1,3 +1,7 @@
+import pytest
+
+pytest.importorskip("fastapi")
+
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -15,6 +19,13 @@ def test_model_registry_helpers(tmp_path, monkeypatch):
         "base_url": "https://example.com/v1",
         "prompt_profile": "You are a careful validator.",
         "adapter": {"notes": "metadata only"},
+        "validator_config": {
+            "max_attempts": 2,
+            "stop_conditions": ["max_retries_reached"],
+            "allowed_decisions": ["accept", "retry_same_node"],
+            "allowed_retry_strategies": ["force_schema"],
+            "compression_token_budget": 512,
+        },
     }
     create_model(payload)
 
@@ -64,3 +75,20 @@ def test_model_registry_api_validation(tmp_path, monkeypatch):
     fetched = client.get("/api/models/planner-1")
     assert fetched.status_code == 200
     assert fetched.json()["role"] == "planner"
+
+
+def test_model_registry_rejects_invalid_validator_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODELS_DIR", str(tmp_path))
+
+    with pytest.raises(ValueError):
+        create_model(
+            {
+                "id": "bad-validator",
+                "role": "validator",
+                "provider": "openai-compatible",
+                "model_name": "gpt-4o-mini",
+                "base_url": "https://example.com/v1",
+                "prompt_profile": "Bad config.",
+                "validator_config": {"max_attempts": -1},
+            }
+        )

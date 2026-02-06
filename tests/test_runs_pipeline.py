@@ -1,8 +1,13 @@
 import json
 
+import pytest
+
+pytest.importorskip("fastapi")
+
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.validator.schema import FinalValidatorLabel, RequestRecord
 
 
 def _write_json(path, payload):
@@ -130,6 +135,39 @@ def test_run_writes_pipeline_snapshots(tmp_path, monkeypatch):
     assert pipeline_snapshot["id"] == "pipeline"
     assert len(model_snapshots["steps"]) == 2
     assert model_snapshots["steps"][0]["model_snapshot"]["id"] == "validator"
+
+    pre_label = json.loads(
+        (runs_dir / run_id / "validator_pre_planner.json").read_text()
+    )
+    pre_request = json.loads(
+        (runs_dir / run_id / "validator_pre_planner_step_01_ingest.json").read_text()
+    )
+    generic_pre_request = json.loads(
+        (runs_dir / run_id / "validator_step_01_ingest.json").read_text()
+    )
+    post_label = json.loads(
+        (runs_dir / run_id / "validator_post_planner.json").read_text()
+    )
+    post_request = json.loads(
+        (runs_dir / run_id / "validator_post_planner_step_01_ingest.json").read_text()
+    )
+
+    FinalValidatorLabel(**pre_label)
+    RequestRecord(**pre_request)
+    RequestRecord(**generic_pre_request)
+    FinalValidatorLabel(**post_label)
+    RequestRecord(**post_request)
+
+    policy_summary = json.loads(
+        (runs_dir / run_id / "validator_pre_planner_step_02_policy.json").read_text()
+    )
+    compress_summary = json.loads(
+        (runs_dir / run_id / "validator_pre_planner_step_03_compress.json").read_text()
+    )
+
+    assert "hard_checks" in policy_summary
+    assert "soft_checks" in policy_summary
+    assert "retry_prompt" in compress_summary
 
 
 def test_run_rejects_role_mismatch(tmp_path, monkeypatch):
