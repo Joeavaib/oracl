@@ -60,6 +60,17 @@
       >
         Modelle abrufen
       </button>
+      <button
+        type="button"
+        class="button"
+        hx-get="/ui/models/discover/vllm_test"
+        hx-include="[name='base_url']"
+        hx-target="#vllm-connection-status"
+        hx-swap="innerHTML"
+      >
+        Test connection
+      </button>
+      <div id="vllm-connection-status"></div>
       <div id="vllm-models-container">
         <datalist id="vllm-models"></datalist>
       </div>
