@@ -17,15 +17,16 @@ from app.models_registry import (
 )
 from app.pipelines_registry import (
     create_pipeline,
-    get_pipeline,
-    list_pipelines,
+    get_pipeline as get_registry_pipeline,
+    list_pipelines as list_registry_pipelines,
     update_pipeline,
+)
 
 from app.pipelines import (
     PipelineValidationError,
     delete_pipeline,
-    get_pipeline,
-    list_pipelines,
+    get_pipeline as get_api_pipeline,
+    list_pipelines as list_api_pipelines,
     save_pipeline,
 
 )
@@ -97,7 +98,7 @@ def _model_form_context(
 
 def _dashboard_context(pipeline_id: Optional[str] = None, error: Optional[str] = None) -> Dict[str, Any]:
     return {
-        "pipelines": list_pipelines(),
+        "pipelines": list_registry_pipelines(),
         "pipeline_id": pipeline_id or "",
         "error": error,
         "max_preview_kb": MAX_PREVIEW_BYTES // 1024,
@@ -114,7 +115,7 @@ async def dashboard(request: Request) -> HTMLResponse:
 
 @router.get("/ui/pipelines", response_class=HTMLResponse)
 async def pipelines_list(request: Request) -> HTMLResponse:
-    pipelines = list_pipelines()
+    pipelines = list_registry_pipelines()
     return templates.TemplateResponse(
         "pipelines.html",
         {"request": request, "pipelines": pipelines},
@@ -132,7 +133,7 @@ async def pipeline_new(request: Request) -> HTMLResponse:
 @router.get("/ui/pipelines/{pipeline_id}", response_class=HTMLResponse)
 async def pipeline_detail(request: Request, pipeline_id: str) -> HTMLResponse:
     try:
-        pipeline = get_pipeline(pipeline_id)
+        pipeline = get_registry_pipeline(pipeline_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     context = _pipeline_form_context(pipeline, is_new=False)
@@ -397,10 +398,12 @@ async def api_list_models() -> Dict[str, Any]:
 async def api_get_model(model_id: str) -> Dict[str, Any]:
     try:
         return get_model(model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 @router.get("/api/pipelines")
 async def api_pipelines() -> Dict[str, Any]:
-    return {"pipelines": list_pipelines()}
+    return {"pipelines": list_api_pipelines()}
 
 
 @router.post("/api/pipelines")
@@ -418,7 +421,7 @@ async def api_create_pipeline(request: Request) -> Dict[str, Any]:
 @router.get("/api/pipelines/{pipeline_id}")
 async def api_get_pipeline(pipeline_id: str) -> Dict[str, Any]:
     try:
-        return get_pipeline(pipeline_id)
+        return get_api_pipeline(pipeline_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -461,4 +464,3 @@ async def api_delete_pipeline(pipeline_id: str) -> Dict[str, Any]:
     if not deleted:
         raise HTTPException(status_code=404, detail="Pipeline not found")
     return {"deleted": True}
-
