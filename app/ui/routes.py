@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from datetime import datetime, timezone
 import urllib.error
 import urllib.parse
@@ -38,10 +39,12 @@ from app.inventory import list_local_gguf_models
 from app.runs import (
     MAX_PREVIEW_BYTES,
     create_stub_run,
+    execute_run_auto,
     get_artifact_path,
     get_events,
     get_run_artifacts,
     list_runs,
+    runs_dir,
 )
 from app.runtime_llamacpp import list_instances as list_llamacpp_instances
 from app.runtime_llamacpp import start_instance as start_llamacpp_instance
@@ -118,6 +121,21 @@ def _parse_list_field(value: Optional[str]) -> List[str]:
     if value is None:
         return []
     return [item.strip() for item in str(value).splitlines() if item.strip()]
+
+
+def _safe_run_dir(run_id: str) -> Path:
+    base = runs_dir().resolve()
+    candidate = (runs_dir() / run_id).resolve()
+    if base not in candidate.parents:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return candidate
+
+
+def _write_run_state(run_id: str, filename: str, payload: Dict[str, Any]) -> None:
+    run_path = _safe_run_dir(run_id)
+    path = run_path / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _parse_validator_config(form: Dict[str, Any]) -> Dict[str, Any]:
@@ -518,6 +536,48 @@ async def api_run_detail(run_id: str) -> Dict[str, Any]:
         return get_run_artifacts(run_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/api/runs/{run_id}/start")
+async def api_run_start(run_id: str) -> Dict[str, Any]:
+    try:
+        execute_run_auto(run_id)
+        return get_run_artifacts(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/api/runs/{run_id}/pause")
+async def api_run_pause(run_id: str) -> Dict[str, Any]:
+    _safe_run_dir(run_id)
+    _write_run_state(
+        run_id,
+        "state_paused.json",
+        {
+            "run_id": run_id,
+            "paused_at": datetime.now(timezone.utc).isoformat(),
+            "status": "PAUSED",
+        },
+    )
+    return get_run_artifacts(run_id)
+
+
+@router.post("/api/runs/{run_id}/resume")
+async def api_run_resume(run_id: str) -> Dict[str, Any]:
+    run_path = _safe_run_dir(run_id)
+    paused_path = run_path / "state_paused.json"
+    if paused_path.exists():
+        paused_path.unlink()
+    _write_run_state(
+        run_id,
+        "state_running.json",
+        {
+            "run_id": run_id,
+            "resumed_at": datetime.now(timezone.utc).isoformat(),
+            "status": "RUNNING",
+        },
+    )
+    return get_run_artifacts(run_id)
 
 
 @router.get("/api/runs/{run_id}/events")
