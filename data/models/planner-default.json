@@ -4,7 +4,7 @@
   "provider": "openai-compatible",
   "model_name": "gpt-4o-mini",
   "base_url": "https://example.com/v1",
-  "prompt_profile": "You are a structured planner.",
+  "prompt_profile": "planner_v1",
   "adapter": {
     "notes": "placeholder model config"
   }

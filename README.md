@@ -14,6 +14,23 @@ Optional (für HTML-Form-Uploads in `/ui`):
 pip install python-multipart
 ```
 
+## Backend Setup (llama.cpp)
+
+Startet zwei `llama-server` Instanzen (Validator auf 8001, Specialist auf 8002). Die UI erwartet Base-URLs **ohne** `/v1`.
+
+```bash
+./scripts/start_llama_validator.sh --model /path/to/validator.gguf --port 8001 --ctx-size 4096 --threads 8
+```
+
+```bash
+./scripts/start_llama_specialist.sh --model /path/to/specialist.gguf --port 8002 --ctx-size 4096 --threads 8
+```
+
+Beispiel-Base-URLs:
+
+- `http://localhost:8001` (Validator)
+- `http://localhost:8002` (Specialist)
+
 ## UI-Routen
 
 - `GET /ui` – Dashboard mit Formular

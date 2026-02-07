@@ -4,7 +4,7 @@
   "provider": "openai-compatible",
   "model_name": "gpt-4o-mini",
   "base_url": "https://example.com/v1",
-  "prompt_profile": "You are a careful coder.",
+  "prompt_profile": "coder_v1",
   "adapter": {
     "notes": "placeholder model config"
   }

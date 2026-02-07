@@ -8,6 +8,15 @@ from typing import Any, Dict, List, Optional
 from app.models_registry import MODEL_ROLES, get_model
 
 
+STEP_TYPES = {"validator_init", "planner", "validator_gate", "coder"}
+STEP_TYPE_ROLE = {
+    "validator_init": "validator",
+    "validator_gate": "validator",
+    "planner": "planner",
+    "coder": "coder",
+}
+
+
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -49,9 +58,18 @@ def _validate_pipeline_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     for step in steps:
         if not isinstance(step, dict):
             raise ValueError("Pipeline steps must be objects")
+        step_type = step.get("type")
         role = step.get("role")
         if role not in MODEL_ROLES:
             raise ValueError(f"step role must be one of {sorted(MODEL_ROLES)}")
+        if step_type is not None:
+            if step_type not in STEP_TYPES:
+                raise ValueError(f"step type must be one of {sorted(STEP_TYPES)}")
+            expected_role = STEP_TYPE_ROLE.get(step_type)
+            if expected_role and role != expected_role:
+                raise ValueError(
+                    f"step type role mismatch: {step_type} must use role {expected_role}"
+                )
         model_id = step.get("model_id")
         if not isinstance(model_id, str) or not model_id.strip():
             raise ValueError("step model_id is required")
