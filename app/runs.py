@@ -105,6 +105,11 @@ def _file_preview(path: Path, max_bytes: int = MAX_PREVIEW_BYTES) -> Dict[str, A
         "content": content,
     }
 
+
+def _approx_token_count(text: str) -> int:
+    return max(1, len(text) // 4) if text else 0
+
+
 def _build_input_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     run_config = payload.get("run_config") or {}
     if not isinstance(run_config, dict):
@@ -160,6 +165,180 @@ def _log_decision(
         },
         stage_id=stage_id,
     )
+
+
+def _pause_run(run_id: str, label: FinalValidatorLabel) -> None:
+    run_path = _safe_run_dir(run_id)
+    _write_json(
+        run_path / "state_paused.json",
+        {
+            "run_id": run_id,
+            "paused_at": datetime.now(timezone.utc).isoformat(),
+            "status": "PAUSED",
+            "reason": "validator_decision",
+            "decision": label.control.dict(),
+        },
+    )
+
+
+def _validator_stage_suffix(stage_id: str) -> str:
+    if stage_id.startswith("validator_"):
+        return stage_id[len("validator_") :]
+    return stage_id
+
+
+def _validator_label_path(run_path: Path, stage_id: str) -> Path:
+    return run_path / f"validator_{_validator_stage_suffix(stage_id)}.json"
+
+
+def _validator_ingest_path(run_path: Path, stage_id: str) -> Path:
+    return run_path / f"validator_{_validator_stage_suffix(stage_id)}_step_01_ingest.json"
+
+
+def _stage_output_filename(stage_id: str) -> str:
+    stage = stage_id.strip().lower()
+    if stage == "planner":
+        return "planner_output.json"
+    if stage == "coder":
+        return "coder_output.json"
+    return f"{stage}_output.json"
+
+
+def _load_steps(run_path: Path) -> List[Dict[str, Any]]:
+    pipeline_snapshot = _read_json(run_path / "pipeline_snapshot.json") or {}
+    steps = pipeline_snapshot.get("steps")
+    if isinstance(steps, list) and steps:
+        return steps
+    model_snapshots = _read_json(run_path / "model_snapshots.json") or {}
+    steps = model_snapshots.get("steps")
+    if isinstance(steps, list):
+        return steps
+    return []
+
+
+def _resolve_stage(run_id: str, stage_index: int) -> Dict[str, Any]:
+    if stage_index < 1:
+        raise ValueError("stage index must be >= 1")
+    run_path = _safe_run_dir(run_id)
+    steps = _load_steps(run_path)
+    if not steps:
+        raise ValueError("No stages available for run")
+    if stage_index > len(steps):
+        raise ValueError("stage index out of range")
+    step = steps[stage_index - 1]
+    stage_type = str(step.get("step") or step.get("role") or f"stage_{stage_index}")
+    role = str(step.get("role") or "").strip().lower()
+    stage_id = stage_type.strip().lower()
+    return {
+        "run_path": run_path,
+        "step": step,
+        "stage_type": stage_type,
+        "stage_id": stage_id,
+        "role": role,
+        "index": stage_index,
+    }
+
+
+def get_stage_prompt(run_id: str, stage_index: int) -> Dict[str, Any]:
+    info = _resolve_stage(run_id, stage_index)
+    run_path = info["run_path"]
+    stage_id = info["stage_id"]
+    role = info["role"]
+    if role == "validator":
+        record = _read_json(_validator_ingest_path(run_path, stage_id)) or {}
+        return {
+            "run_id": run_id,
+            "stage_index": stage_index,
+            "stage": stage_id,
+            "prompt": record.get("prompt"),
+            "request_record": record,
+        }
+    inference = _read_json(run_path / f"{stage_id}_inference.json") or {}
+    return {
+        "run_id": run_id,
+        "stage_index": stage_index,
+        "stage": stage_id,
+        "messages": inference.get("messages"),
+        "model": inference.get("model"),
+    }
+
+
+def get_stage_output(run_id: str, stage_index: int) -> Dict[str, Any]:
+    info = _resolve_stage(run_id, stage_index)
+    run_path = info["run_path"]
+    stage_id = info["stage_id"]
+    role = info["role"]
+    if role == "validator":
+        label = _read_json(_validator_label_path(run_path, stage_id))
+        if label is None:
+            raise ValueError("Validator output not found")
+        return {
+            "run_id": run_id,
+            "stage_index": stage_index,
+            "stage": stage_id,
+            "output": label,
+        }
+    output = _read_json(run_path / _stage_output_filename(stage_id))
+    if output is None:
+        raise ValueError("Stage output not found")
+    return {
+        "run_id": run_id,
+        "stage_index": stage_index,
+        "stage": stage_id,
+        "output": output,
+    }
+
+
+def get_stage_decision(run_id: str, stage_index: int) -> Dict[str, Any]:
+    info = _resolve_stage(run_id, stage_index)
+    run_path = info["run_path"]
+    stage_id = info["stage_id"]
+    role = info["role"]
+    if role != "validator":
+        raise ValueError("Stage has no validator decision")
+    label = _read_json(_validator_label_path(run_path, stage_id))
+    if label is None:
+        raise ValueError("Validator decision not found")
+    return {
+        "run_id": run_id,
+        "stage_index": stage_index,
+        "stage": stage_id,
+        "decision": label.get("control"),
+    }
+
+
+def get_token_usage(run_id: str) -> Dict[str, Any]:
+    run_path = _safe_run_dir(run_id)
+    steps = _load_steps(run_path)
+    stage_usages: List[Dict[str, Any]] = []
+    total_tokens = 0
+    for index, step in enumerate(steps, start=1):
+        stage_type = str(step.get("step") or step.get("role") or f"stage_{index}")
+        stage_id = stage_type.strip().lower()
+        inference = _read_json(run_path / f"{stage_id}_inference.json")
+        if not inference:
+            continue
+        messages = inference.get("messages")
+        response_text = inference.get("response_text")
+        prompt_tokens = _approx_token_count(json.dumps(messages, ensure_ascii=False))
+        completion_tokens = _approx_token_count(str(response_text or ""))
+        total = prompt_tokens + completion_tokens
+        total_tokens += total
+        stage_usages.append(
+            {
+                "stage": stage_id,
+                "stage_index": index,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total,
+            }
+        )
+    return {
+        "run_id": run_id,
+        "approximate": True,
+        "total_tokens": total_tokens,
+        "stages": stage_usages,
+    }
 
 
 def create_run(payload: Dict[str, Any]) -> str:
@@ -399,26 +578,114 @@ def execute_run_auto(run_id: str) -> None:
     )
 
     try:
-        planner_output: Optional[Dict[str, Any]] = None
+        planner_output: Optional[Dict[str, Any]] = _read_json(run_path / "planner_output.json")
         for step in steps:
             if not isinstance(step, dict):
                 continue
             role = step.get("role")
             stage_type = step.get("step") or role or "stage"
+            stage_id = str(stage_type).strip().lower()
+            if role == "validator":
+                label_path = _validator_label_path(run_path, stage_id)
+                if label_path.exists():
+                    existing = _read_json(label_path) or {}
+                    if existing.get("orchestra_briefing"):
+                        briefing = existing["orchestra_briefing"]
+                    continue
+                if stage_id == "validator_pre_planner":
+                    request_record = RequestRecord(
+                        request_id=f"{run_id}-validator-pre-planner",
+                        created_at=datetime.now(timezone.utc),
+                        prompt="Validate task intake JSON for required fields and types.",
+                        response_text=json.dumps(input_payload),
+                        required_fields=[
+                            "goal",
+                            "user_prompt",
+                            "repo_root",
+                            "constraints",
+                            "pipeline_id",
+                        ],
+                        allowed_fields=[
+                            "goal",
+                            "user_prompt",
+                            "repo_root",
+                            "constraints",
+                            "pipeline_id",
+                        ],
+                        field_types={
+                            "goal": "string",
+                            "user_prompt": "string",
+                            "repo_root": "string",
+                            "constraints": "array",
+                            "pipeline_id": "string",
+                        },
+                    )
+                elif stage_id == "validator_post_planner":
+                    if planner_output is None:
+                        raise ValueError("Planner output missing for validator_post_planner")
+                    request_record = RequestRecord(
+                        request_id=f"{run_id}-validator-post-planner",
+                        created_at=datetime.now(timezone.utc),
+                        prompt="Validate planner output JSON for required fields and types.",
+                        response_text=json.dumps(planner_output),
+                        required_fields=[
+                            "summary",
+                            "plan_steps",
+                            "files_to_touch",
+                            "risks",
+                            "needs_context",
+                            "success_signals",
+                        ],
+                        allowed_fields=[
+                            "summary",
+                            "plan_steps",
+                            "files_to_touch",
+                            "risks",
+                            "needs_context",
+                            "success_signals",
+                        ],
+                        field_types={
+                            "summary": "string",
+                            "plan_steps": "array",
+                            "files_to_touch": "array",
+                            "risks": "array",
+                            "needs_context": "array",
+                            "success_signals": "array",
+                        },
+                    )
+                else:
+                    raise ValueError(f"Unsupported validator stage: {stage_type}")
+                label = validate_request(request_record)
+                _write_validator_artifacts(
+                    run_path,
+                    stage=_validator_stage_suffix(stage_id),
+                    request_record=request_record,
+                    label=label,
+                )
+                _log_decision(run_id, stage_id, label)
+                briefing = label.orchestra_briefing.dict()
+                if label.control.decision != "accept":
+                    _pause_run(run_id, label)
+                    return
+                continue
             if role not in {"planner", "coder"}:
                 continue
 
-            stage_payload = dict(input_payload)
-            stage_payload["orchestra_briefing"] = briefing
-            if role == "coder" and planner_output is not None:
-                stage_payload["planner_output"] = planner_output
+            stage_output_path = run_path / _stage_output_filename(stage_id)
+            if stage_output_path.exists():
+                output_payload = _read_json(stage_output_path) or {}
+            else:
+                stage_payload = dict(input_payload)
+                stage_payload["orchestra_briefing"] = briefing
+                if role == "coder" and planner_output is not None:
+                    stage_payload["planner_output"] = planner_output
 
-            output_payload = run_stage(
-                run_id=run_id,
-                stage_type=stage_type,
-                model_snapshot=step,
-                input_payload=stage_payload,
-            )
+                output_payload = run_stage(
+                    run_id=run_id,
+                    stage_type=stage_type,
+                    model_snapshot=step,
+                    input_payload=stage_payload,
+                )
             if role == "planner":
                 planner_output = output_payload
 
