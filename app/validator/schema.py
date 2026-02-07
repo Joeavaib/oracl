@@ -56,6 +56,24 @@ class ErrorLocalization(BaseModel):
         extra = "forbid"
 
 
+class CompressedSpec(BaseModel):
+    features: List[str]
+
+    class Config:
+        extra = "forbid"
+
+
+class CompressedScript(BaseModel):
+    task_id: str
+    intent: str
+    spec: CompressedSpec
+    constraints: List[str]
+    budgets: Dict[str, int]
+
+    class Config:
+        extra = "forbid"
+
+
 class OrchestraBriefing(BaseModel):
     known_correct: List[str]
     uncertain_or_needs_check: List[str]
@@ -63,6 +81,11 @@ class OrchestraBriefing(BaseModel):
     next_actions: List[str] = Field(min_items=3, max_items=7)
     optional_patch: Optional[str] = None
     retry_prompt: str
+    script: CompressedScript
+    current_scope: List[str]
+    allowed_actions: List[str]
+    token_budget: Optional[int] = None
+    constraints: List[str]
 
     class Config:
         extra = "forbid"
