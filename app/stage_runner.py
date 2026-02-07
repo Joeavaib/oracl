@@ -15,7 +15,7 @@ from app.event_store import (
 from app.llm_client import LLMClientError, chat_completions
 from app.output_parser import extract_json
 from app.prompt_builder import build_prompt
-from app.runs import runs_dir
+from app.paths import runs_dir
 
 
 class StageRunnerError(RuntimeError):

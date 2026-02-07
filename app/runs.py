@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +17,7 @@ from app.event_store import (
     append_event,
     list_events,
 )
+from app.paths import repo_root as paths_repo_root, runs_dir as paths_runs_dir
 from app.pipelines_registry import get_pipeline, resolve_model_snapshots
 from app.stage_runner import StageRunnerError, run_stage
 from app.validator.engine import compress_user_prompt_to_script, validate_request
@@ -28,11 +28,11 @@ MAX_PREVIEW_BYTES = 200 * 1024
 
 
 def repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return paths_repo_root()
 
 
 def runs_dir() -> Path:
-    return Path(os.getenv("RUNS_DIR", repo_root() / "runs"))
+    return paths_runs_dir()
 
 
 def _safe_run_dir(run_id: str) -> Path:
