@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from app.event_store import (
+    DECISION_MADE,
     RUN_COMPLETED,
     RUN_CREATED,
     RUN_FAILED,
@@ -105,12 +106,20 @@ def _file_preview(path: Path, max_bytes: int = MAX_PREVIEW_BYTES) -> Dict[str, A
     }
 
 def _build_input_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    run_config = payload.get("run_config") or {}
+    if not isinstance(run_config, dict):
+        run_config = {}
+    run_config = {
+        "max_retries_per_stage": run_config.get("max_retries_per_stage", 2),
+        "escalation_threshold": run_config.get("escalation_threshold", 0.4),
+    }
     return {
         "goal": payload.get("goal") or payload.get("user_prompt") or "",
         "user_prompt": payload.get("user_prompt") or "",
         "repo_root": payload.get("repo_root") or "",
         "constraints": payload.get("constraints") or [],
         "pipeline_id": payload.get("pipeline_id") or "",
+        "run_config": run_config,
     }
 
 
@@ -131,6 +140,25 @@ def _initial_orchestra_briefing(user_prompt: str) -> OrchestraBriefing:
         allowed_actions=[],
         token_budget=None,
         constraints=[],
+    )
+
+
+def _log_decision(
+    run_id: str,
+    stage_id: str,
+    label: FinalValidatorLabel,
+) -> None:
+    append_event(
+        run_id,
+        DECISION_MADE,
+        {
+            "decision": label.control.dict(),
+            "hard_checks": label.hard_checks.dict(),
+            "soft_checks": label.soft_checks.dict(),
+            "minimal_rationale": label.minimal_rationale,
+            "retry_prompt": label.orchestra_briefing.retry_prompt,
+        },
+        stage_id=stage_id,
     )
 
 
@@ -158,6 +186,7 @@ def create_run(payload: Dict[str, Any]) -> str:
         {
             "run_id": run_id,
             "created_at": created_at,
+            "status": "CREATED",
             "task": {
                 "task_id": run_id,
                 "goal": input_payload["goal"],
@@ -165,6 +194,7 @@ def create_run(payload: Dict[str, Any]) -> str:
                 "constraints": input_payload["constraints"],
             },
             "inputs": {"user_prompt": input_payload["user_prompt"]},
+            "run_config": input_payload["run_config"],
         },
     )
     _write_json(
@@ -205,6 +235,7 @@ def create_stub_run(payload: Dict[str, Any]) -> str:
         request_record=pre_request,
         label=pre_label,
     )
+    _log_decision(run_id, "validator_pre_planner", pre_label)
     _write_json(run_path / "validator_step_01_ingest.json", pre_request.dict())
     _write_json(
         run_path / "validator_step_02_policy.json",
@@ -262,6 +293,7 @@ def create_stub_run(payload: Dict[str, Any]) -> str:
         request_record=planner_request,
         label=planner_label,
     )
+    _log_decision(run_id, "validator_post_planner", planner_label)
     _write_json(
         run_path / "coder_output.json",
         {
@@ -277,11 +309,19 @@ def create_stub_run(payload: Dict[str, Any]) -> str:
         {
             "run_id": run_id,
             "completed_at": datetime.now(timezone.utc).isoformat(),
-            "status": "done",
+            "status": "COMPLETED",
         },
     )
 
     append_event(run_id, RUN_STARTED, {"pipeline_id": pipeline_snapshot.get("id")})
+    _write_json(
+        run_path / "state_running.json",
+        {
+            "run_id": run_id,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "status": "RUNNING",
+        },
+    )
     append_event(
         run_id,
         STAGE_STARTED,
@@ -330,7 +370,7 @@ def create_stub_run(payload: Dict[str, Any]) -> str:
         {"message": "Stub coder completed."},
         stage_id="coder",
     )
-    append_event(run_id, RUN_COMPLETED, {"status": "done"})
+    append_event(run_id, RUN_COMPLETED, {"status": "COMPLETED"})
 
     return run_id
 
@@ -349,6 +389,14 @@ def execute_run_auto(run_id: str) -> None:
         raise ValueError("model_snapshots missing steps")
 
     append_event(run_id, RUN_STARTED, {"pipeline_id": pipeline_snapshot.get("id")})
+    _write_json(
+        run_path / "state_running.json",
+        {
+            "run_id": run_id,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "status": "RUNNING",
+        },
+    )
 
     try:
         planner_output: Optional[Dict[str, Any]] = None
@@ -379,17 +427,17 @@ def execute_run_auto(run_id: str) -> None:
             {
                 "run_id": run_id,
                 "completed_at": datetime.now(timezone.utc).isoformat(),
-                "status": "done",
+                "status": "COMPLETED",
             },
         )
-        append_event(run_id, RUN_COMPLETED, {"status": "done"})
+        append_event(run_id, RUN_COMPLETED, {"status": "COMPLETED"})
     except (StageRunnerError, ValueError) as exc:
         _write_json(
             run_path / "state_final.json",
             {
                 "run_id": run_id,
                 "completed_at": datetime.now(timezone.utc).isoformat(),
-                "status": "failed",
+                "status": "FAILED",
                 "error": str(exc),
             },
         )
@@ -409,9 +457,18 @@ def _detect_status(run_path: Path) -> str:
     state_final = _read_json(run_path / "state_final.json")
     if state_final and state_final.get("status"):
         return str(state_final["status"])
+    state_paused = _read_json(run_path / "state_paused.json")
+    if state_paused and state_paused.get("status"):
+        return str(state_paused["status"])
+    state_running = _read_json(run_path / "state_running.json")
+    if state_running and state_running.get("status"):
+        return str(state_running["status"])
     if (run_path / "state_final.json").exists():
-        return "done"
-    return "running"
+        return "COMPLETED"
+    state_initial = _read_json(run_path / "state_initial.json")
+    if state_initial and state_initial.get("status"):
+        return str(state_initial["status"])
+    return "CREATED"
 
 
 def _detect_last_stage(run_path: Path) -> str:
@@ -455,6 +512,8 @@ def get_run_artifacts(run_id: str) -> Dict[str, Any]:
     artifacts = {
         "input.json": _file_preview(run_path / "input.json"),
         "state_initial.json": _file_preview(run_path / "state_initial.json"),
+        "state_running.json": _file_preview(run_path / "state_running.json"),
+        "state_paused.json": _file_preview(run_path / "state_paused.json"),
         "validator_pre_planner.json": _file_preview(
             run_path / "validator_pre_planner.json"
         ),
@@ -528,6 +587,8 @@ def get_artifact_path(run_id: str, name: str) -> Path:
     allowed = {
         "input.json",
         "state_initial.json",
+        "state_running.json",
+        "state_paused.json",
         "validator_pre_planner.json",
         "validator_step_01_ingest.json",
         "validator_step_02_policy.json",
