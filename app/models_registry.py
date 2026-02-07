@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 
 MODEL_ROLES = {"validator", "planner", "coder"}
-MODEL_PROVIDERS = {"openai-compatible", "vllm", "ollama"}
+MODEL_PROVIDERS = {"openai-compatible", "vllm", "llamacpp", "ollama"}
 VALIDATOR_DECISIONS = {
     "accept",
     "retry_same_node",
@@ -32,6 +32,13 @@ def repo_root() -> Path:
 
 def models_dir() -> Path:
     return Path(os.getenv("MODELS_DIR", repo_root() / "data" / "models"))
+
+
+def gguf_dir() -> Optional[Path]:
+    env_value = os.getenv("GGUF_DIR")
+    if env_value is not None and not env_value.strip():
+        return None
+    return Path(env_value) if env_value else repo_root() / "models_gguf"
 
 
 def _safe_model_path(model_id: str) -> Path:
@@ -74,6 +81,19 @@ def _validate_optional_int(payload: Dict[str, Any], key: str) -> Optional[int]:
         raise ValueError(f"{key} must be an integer")
     if value < 0:
         raise ValueError(f"{key} must be non-negative")
+    return value
+
+
+def _validate_optional_string(payload: Dict[str, Any], key: str) -> Optional[str]:
+    if key not in payload:
+        return None
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be a string")
+    if not value.strip():
+        return None
     return value
 
 
@@ -159,6 +179,9 @@ def _validate_model_payload(payload: Dict[str, Any], require_all: bool = True) -
 
     if "adapter" in payload:
         data["adapter"] = payload.get("adapter")
+    model_path = _validate_optional_string(payload, "model_path")
+    if model_path is not None:
+        data["model_path"] = model_path
     return data
 
 

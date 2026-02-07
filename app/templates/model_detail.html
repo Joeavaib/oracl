@@ -53,32 +53,68 @@
       <button
         type="button"
         class="button"
-        hx-get="/ui/models/discover/vllm"
+        hx-get="/ui/models/discover/openai_models"
         hx-include="[name='base_url']"
         hx-target="#vllm-models-container"
         hx-swap="innerHTML"
       >
-        Modelle abrufen
+        Modelle abrufen (llama.cpp · OpenAI-compat)
       </button>
       <button
         type="button"
         class="button"
-        hx-get="/ui/models/discover/vllm_test"
+        hx-get="/ui/models/discover/openai_test"
         hx-include="[name='base_url']"
         hx-target="#vllm-connection-status"
         hx-swap="innerHTML"
       >
-        Test connection
+        Test connection (llama.cpp · OpenAI-compat)
       </button>
       <div id="vllm-connection-status"></div>
       <div id="vllm-models-container">
         <datalist id="vllm-models"></datalist>
       </div>
     </div>
+    <div class="stack">
+      <button type="button" class="button" id="llamacpp-start">
+        Start llama-server
+      </button>
+      <button type="button" class="button" id="llamacpp-stop">
+        Stop llama-server
+      </button>
+      <button type="button" class="button" id="llamacpp-use-endpoint">
+        Use running endpoint as base_url
+      </button>
+      <input type="hidden" name="runtime_instance_id" id="llamacpp-instance-id" />
+      <div id="llamacpp-runtime-status" class="hint"></div>
+    </div>
     <label>
       Base URL
       <input type="text" name="base_url" value="{{ model.base_url or "" }}" required />
     </label>
+    <label>
+      Model Path (optional, local GGUF)
+      <input
+        type="text"
+        name="model_path"
+        value="{{ model.model_path or "" }}"
+        list="local-gguf-models"
+      />
+    </label>
+    <div class="stack">
+      <button
+        type="button"
+        class="button"
+        hx-get="/ui/models/discover/local_gguf"
+        hx-target="#local-gguf-models-container"
+        hx-swap="innerHTML"
+      >
+        Lokale GGUFs vorschlagen
+      </button>
+      <div id="local-gguf-models-container">
+        <datalist id="local-gguf-models"></datalist>
+      </div>
+    </div>
     <label>
       Prompt Profile
       <textarea name="prompt_profile" rows="6" required>{{ model.prompt_profile or "" }}</textarea>
@@ -135,4 +171,110 @@
   </form>
   {% endif %}
 </section>
+<script>
+  (() => {
+    const startButton = document.getElementById("llamacpp-start");
+    const stopButton = document.getElementById("llamacpp-stop");
+    const useButton = document.getElementById("llamacpp-use-endpoint");
+    const statusEl = document.getElementById("llamacpp-runtime-status");
+    const instanceInput = document.getElementById("llamacpp-instance-id");
+    const modelPathInput = document.querySelector("[name='model_path']");
+    const roleInput = document.querySelector("[name='role']");
+    const baseUrlInput = document.querySelector("[name='base_url']");
+
+    const setStatus = (text, isError = false) => {
+      statusEl.textContent = text;
+      statusEl.classList.toggle("warning", isError);
+      statusEl.classList.toggle("hint", !isError);
+    };
+
+    const fetchJson = async (url, options = {}) => {
+      const response = await fetch(url, options);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail = payload.detail || response.statusText;
+        throw new Error(detail);
+      }
+      return payload;
+    };
+
+    const getRunningInstance = (instances) => {
+      const role = roleInput?.value;
+      return (
+        instances.find((entry) => entry.status === "running" && entry.role === role) ||
+        instances.find((entry) => entry.status === "running")
+      );
+    };
+
+    startButton?.addEventListener("click", async () => {
+      if (!modelPathInput?.value) {
+        setStatus("Bitte zuerst einen Model Path angeben.", true);
+        return;
+      }
+      try {
+        const payload = {
+          model_path: modelPathInput.value,
+          role: roleInput?.value,
+        };
+        const data = await fetchJson("/api/runtimes/llamacpp/start", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        });
+        instanceInput.value = data.id || "";
+        statusEl.dataset.baseUrl = data.base_url || "";
+        setStatus(`Gestartet auf ${data.base_url || "unknown"}.`);
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    });
+
+    stopButton?.addEventListener("click", async () => {
+      try {
+        let instanceId = instanceInput.value;
+        if (!instanceId) {
+          const list = await fetchJson("/api/runtimes/llamacpp/list");
+          const running = getRunningInstance(list.instances || []);
+          instanceId = running?.id || "";
+        }
+        if (!instanceId) {
+          setStatus("Keine laufende Instanz gefunden.", true);
+          return;
+        }
+        await fetchJson("/api/runtimes/llamacpp/stop", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({instance_id: instanceId}),
+        });
+        instanceInput.value = "";
+        statusEl.dataset.baseUrl = "";
+        setStatus("Instanz gestoppt.");
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    });
+
+    useButton?.addEventListener("click", async () => {
+      try {
+        let baseUrl = statusEl.dataset.baseUrl || "";
+        if (!baseUrl) {
+          const list = await fetchJson("/api/runtimes/llamacpp/list");
+          const running = getRunningInstance(list.instances || []);
+          baseUrl = running?.base_url || "";
+          statusEl.dataset.baseUrl = baseUrl;
+        }
+        if (!baseUrl) {
+          setStatus("Keine laufende Instanz gefunden.", true);
+          return;
+        }
+        if (baseUrlInput) {
+          baseUrlInput.value = baseUrl;
+        }
+        setStatus(`base_url gesetzt: ${baseUrl}`);
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    });
+  })();
+</script>
 {% endblock %}

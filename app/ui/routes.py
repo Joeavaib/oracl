@@ -34,6 +34,7 @@ from app.pipelines import (
     list_pipelines as list_api_pipelines,
     save_pipeline,
 )
+from app.inventory import list_local_gguf_models
 from app.runs import (
     MAX_PREVIEW_BYTES,
     create_stub_run,
@@ -42,14 +43,17 @@ from app.runs import (
     get_run_artifacts,
     list_runs,
 )
+from app.runtime_llamacpp import list_instances as list_llamacpp_instances
+from app.runtime_llamacpp import start_instance as start_llamacpp_instance
+from app.runtime_llamacpp import stop_instance as stop_llamacpp_instance
 
 
 router = APIRouter()
 
 templates = Jinja2Templates(directory="app/templates")
 
-_VLLM_DISCOVERY_CACHE: Dict[str, Dict[str, Any]] = {}
-_VLLM_DISCOVERY_TTL_S = 30
+_OPENAI_DISCOVERY_CACHE: Dict[str, Dict[str, Any]] = {}
+_OPENAI_DISCOVERY_TTL_S = 30
 
 
 def _pipeline_steps_from_form(form: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -140,30 +144,26 @@ def _parse_validator_config(form: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
-def _normalize_vllm_base_url(base_url: str) -> str:
+def _normalize_openai_base_url(base_url: str) -> str:
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("base_url is required")
     parsed = urllib.parse.urlparse(base_url.strip())
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("base_url must include scheme and host")
     path = parsed.path.rstrip("/")
-    if path in ("", "/v1"):
-        normalized_path = "/v1"
-    else:
+    if path not in ("", "/v1"):
         raise ValueError("base_url must end with /v1 or omit path")
-    return urllib.parse.urlunparse(
-        (parsed.scheme, parsed.netloc, normalized_path, "", "", "")
-    )
+    return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
 
 
-def _fetch_vllm_models(normalized_base_url: str) -> List[str]:
-    url = f"{normalized_base_url}/models"
+def _fetch_openai_models(base_url: str) -> List[str]:
+    url = f"{base_url}/v1/models"
     request = urllib.request.Request(url, method="GET")
     with urllib.request.urlopen(request, timeout=10) as response:
         payload = json.loads(response.read().decode("utf-8"))
     data = payload.get("data")
     if not isinstance(data, list):
-        raise ValueError("Invalid vLLM response")
+        raise ValueError("Invalid discovery response")
     return [
         item["id"]
         for item in data
@@ -171,13 +171,13 @@ def _fetch_vllm_models(normalized_base_url: str) -> List[str]:
     ]
 
 
-def _get_cached_vllm_models(normalized_base_url: str) -> List[str]:
+def _get_cached_openai_models(base_url: str) -> List[str]:
     now = datetime.now(timezone.utc).timestamp()
-    cached = _VLLM_DISCOVERY_CACHE.get(normalized_base_url)
-    if cached and (now - cached["timestamp"] <= _VLLM_DISCOVERY_TTL_S):
+    cached = _OPENAI_DISCOVERY_CACHE.get(base_url)
+    if cached and (now - cached["timestamp"] <= _OPENAI_DISCOVERY_TTL_S):
         return cached["models"]
-    models = _fetch_vllm_models(normalized_base_url)
-    _VLLM_DISCOVERY_CACHE[normalized_base_url] = {
+    models = _fetch_openai_models(base_url)
+    _OPENAI_DISCOVERY_CACHE[base_url] = {
         "timestamp": now,
         "models": models,
     }
@@ -280,6 +280,7 @@ async def model_create(request: Request) -> HTMLResponse:
         "model_name": form.get("model_name"),
         "base_url": form.get("base_url"),
         "prompt_profile": form.get("prompt_profile"),
+        "model_path": form.get("model_path"),
         "adapter": form.get("adapter") or None,
     }
     try:
@@ -308,6 +309,7 @@ async def model_update(request: Request, model_id: str) -> HTMLResponse:
         "model_name": form.get("model_name"),
         "base_url": form.get("base_url"),
         "prompt_profile": form.get("prompt_profile"),
+        "model_path": form.get("model_path"),
         "adapter": form.get("adapter") or None,
     }
     try:
@@ -337,18 +339,18 @@ async def model_test(request: Request, model_id: str) -> HTMLResponse:
     return templates.TemplateResponse("model_detail.html", context)
 
 
-@router.get("/ui/models/discover/vllm", response_class=HTMLResponse)
-async def ui_discover_vllm_models(base_url: str | None = None) -> HTMLResponse:
+@router.get("/ui/models/discover/openai_models", response_class=HTMLResponse)
+async def ui_discover_openai_models(base_url: str | None = None) -> HTMLResponse:
     if not base_url:
         raise HTTPException(status_code=400, detail="base_url is required")
     try:
-        normalized = _normalize_vllm_base_url(base_url)
+        normalized = _normalize_openai_base_url(base_url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        model_ids = _get_cached_vllm_models(normalized)
+        model_ids = _get_cached_openai_models(normalized)
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail="vLLM discovery failed") from exc
+        raise HTTPException(status_code=502, detail="Discovery failed") from exc
     options = "\n".join(
         f"<option value=\"{model_id}\"></option>" for model_id in model_ids
     )
@@ -356,19 +358,40 @@ async def ui_discover_vllm_models(base_url: str | None = None) -> HTMLResponse:
     return HTMLResponse(content=html)
 
 
-@router.get("/ui/models/discover/vllm_test", response_class=HTMLResponse)
-async def ui_discover_vllm_test(base_url: str | None = None) -> HTMLResponse:
+@router.get("/ui/models/discover/openai_test", response_class=HTMLResponse)
+async def ui_discover_openai_test(base_url: str | None = None) -> HTMLResponse:
     if not base_url:
         raise HTTPException(status_code=400, detail="base_url is required")
     try:
-        normalized = _normalize_vllm_base_url(base_url)
+        normalized = _normalize_openai_base_url(base_url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        _fetch_vllm_models(normalized)
+        _fetch_openai_models(normalized)
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError):
         return HTMLResponse(content="<p class=\"warning\">FAIL</p>")
     return HTMLResponse(content="<p class=\"hint\">OK</p>")
+
+
+@router.get("/ui/models/discover/vllm", response_class=HTMLResponse)
+async def ui_discover_vllm_models(base_url: str | None = None) -> HTMLResponse:
+    return await ui_discover_openai_models(base_url=base_url)
+
+
+@router.get("/ui/models/discover/vllm_test", response_class=HTMLResponse)
+async def ui_discover_vllm_test(base_url: str | None = None) -> HTMLResponse:
+    return await ui_discover_openai_test(base_url=base_url)
+
+
+@router.get("/ui/models/discover/local_gguf", response_class=HTMLResponse)
+async def ui_discover_local_gguf_models() -> HTMLResponse:
+    suggestions = list_local_gguf_models()
+    options = "\n".join(
+        f"<option value=\"{entry['model_path']}\">{entry['display_name']}</option>"
+        for entry in suggestions
+    )
+    html = f"<datalist id=\"local-gguf-models\">{options}</datalist>"
+    return HTMLResponse(content=html)
 
 
 @router.post("/ui/pipelines")
@@ -606,16 +629,68 @@ async def api_delete_pipeline(pipeline_id: str) -> Dict[str, Any]:
     return {"deleted": True}
 
 
-@router.get("/api/discovery/vllm_models")
-async def api_discovery_vllm_models(base_url: str | None = None) -> Dict[str, Any]:
+@router.get("/api/discovery/openai_models")
+async def api_discovery_openai_models(base_url: str | None = None) -> Dict[str, Any]:
     if not base_url:
         raise HTTPException(status_code=400, detail="base_url is required")
     try:
-        normalized = _normalize_vllm_base_url(base_url)
+        normalized = _normalize_openai_base_url(base_url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        model_ids = _get_cached_vllm_models(normalized)
+        model_ids = _get_cached_openai_models(normalized)
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail="vLLM discovery failed") from exc
+        raise HTTPException(status_code=502, detail="Discovery failed") from exc
     return {"models": model_ids}
+
+
+@router.get("/api/discovery/vllm_models")
+async def api_discovery_vllm_models(base_url: str | None = None) -> Dict[str, Any]:
+    return await api_discovery_openai_models(base_url=base_url)
+
+
+@router.get("/api/discovery/local_gguf")
+async def api_discovery_local_gguf() -> Dict[str, Any]:
+    return {"models": list_local_gguf_models()}
+
+
+@router.post("/api/runtimes/llamacpp/start")
+async def api_llamacpp_start(request: Request) -> Dict[str, Any]:
+    payload = await request.json()
+    role = payload.get("role")
+    model_path = payload.get("model_path")
+    port = payload.get("port")
+    ctx_size = payload.get("ctx_size")
+    threads = payload.get("threads")
+    extra_args: List[str] = []
+    if ctx_size is not None:
+        extra_args.extend(["--ctx-size", str(ctx_size)])
+    if threads is not None:
+        extra_args.extend(["--threads", str(threads)])
+    try:
+        return start_llamacpp_instance(
+            role=role,
+            model_path=model_path,
+            port=port,
+            extra_args=extra_args or None,
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/runtimes/llamacpp/stop")
+async def api_llamacpp_stop(request: Request) -> Dict[str, Any]:
+    payload = await request.json()
+    instance_id = payload.get("instance_id")
+    try:
+        stopped = stop_llamacpp_instance(instance_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not stopped:
+        raise HTTPException(status_code=404, detail="Instance not found")
+    return {"stopped": True}
+
+
+@router.get("/api/runtimes/llamacpp/list")
+async def api_llamacpp_list() -> Dict[str, Any]:
+    return {"instances": list_llamacpp_instances()}
