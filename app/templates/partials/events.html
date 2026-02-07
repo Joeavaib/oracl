@@ -4,8 +4,20 @@
     <a class="button" href="/api/runs/{{ events.run_id }}/artifact?name=events.jsonl">Download events.jsonl</a>
   </div>
   {% if events.events %}
-  <pre class="code">{% for line in events.events %}{{ line }}
-{% endfor %}</pre>
+  <ul class="events-list">
+    {% for event in events.events %}
+    <li class="event-item">
+      <div class="event-meta">
+        <strong>{{ event.type }}</strong>
+        {% if event.stage_id %} · <span>Stage: {{ event.stage_id }}</span>{% endif %}
+      </div>
+      <div class="hint">{{ event.timestamp }}</div>
+      {% if event.payload_pretty %}
+      <pre class="code">{{ event.payload_pretty }}</pre>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
   {% else %}
   <p>Keine Events vorhanden.</p>
   {% endif %}

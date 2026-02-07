@@ -7,6 +7,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from app.event_store import (
+    RUN_COMPLETED,
+    RUN_CREATED,
+    RUN_STARTED,
+    STAGE_COMPLETED,
+    STAGE_STARTED,
+    append_event,
+    list_events,
+)
 from app.pipelines_registry import get_pipeline, resolve_model_snapshots
 from app.validator.engine import validate_request
 from app.validator.schema import FinalValidatorLabel, RequestRecord
@@ -92,14 +101,6 @@ def _file_preview(path: Path, max_bytes: int = MAX_PREVIEW_BYTES) -> Dict[str, A
         "truncated": truncated,
         "content": content,
     }
-
-
-def _tail_lines(path: Path, limit: int) -> List[str]:
-    if not path.exists():
-        return []
-    with path.open("r", encoding="utf-8", errors="replace") as handle:
-        lines = handle.readlines()
-    return [line.rstrip("\n") for line in lines[-limit:]]
 
 
 def create_stub_run(payload: Dict[str, Any]) -> str:
@@ -239,32 +240,57 @@ def create_stub_run(payload: Dict[str, Any]) -> str:
         },
     )
 
-    events_path = run_path / "events.jsonl"
-    events = [
-        {
-            "timestamp": created_at,
-            "stage": "validator_pre_planner",
-            "message": "Stub validator ran.",
-        },
-        {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "stage": "planner",
-            "message": "Stub planner ran.",
-        },
-        {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "stage": "validator_post_planner",
-            "message": "Stub validator ran.",
-        },
-        {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "stage": "coder",
-            "message": "Stub coder ran.",
-        },
-    ]
-    with events_path.open("w", encoding="utf-8") as handle:
-        for entry in events:
-            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    append_event(run_id, RUN_CREATED, {"created_at": created_at})
+    append_event(run_id, RUN_STARTED, {"pipeline_id": pipeline_snapshot["id"]})
+    append_event(
+        run_id,
+        STAGE_STARTED,
+        {"message": "Stub validator ran."},
+        stage_id="validator_pre_planner",
+    )
+    append_event(
+        run_id,
+        STAGE_COMPLETED,
+        {"message": "Stub validator completed."},
+        stage_id="validator_pre_planner",
+    )
+    append_event(
+        run_id,
+        STAGE_STARTED,
+        {"message": "Stub planner ran."},
+        stage_id="planner",
+    )
+    append_event(
+        run_id,
+        STAGE_COMPLETED,
+        {"message": "Stub planner completed."},
+        stage_id="planner",
+    )
+    append_event(
+        run_id,
+        STAGE_STARTED,
+        {"message": "Stub validator ran."},
+        stage_id="validator_post_planner",
+    )
+    append_event(
+        run_id,
+        STAGE_COMPLETED,
+        {"message": "Stub validator completed."},
+        stage_id="validator_post_planner",
+    )
+    append_event(
+        run_id,
+        STAGE_STARTED,
+        {"message": "Stub coder ran."},
+        stage_id="coder",
+    )
+    append_event(
+        run_id,
+        STAGE_COMPLETED,
+        {"message": "Stub coder completed."},
+        stage_id="coder",
+    )
+    append_event(run_id, RUN_COMPLETED, {"status": "done"})
 
     return run_id
 
@@ -377,13 +403,22 @@ def get_run_artifacts(run_id: str) -> Dict[str, Any]:
 
 def get_events(run_id: str, tail: int = 200) -> Dict[str, Any]:
     run_path = _safe_run_dir(run_id)
-    events_path = run_path / "events.jsonl"
-    lines = _tail_lines(events_path, tail)
+    events = list_events(run_id)
+    if tail:
+        events = events[-tail:]
+    for event in events:
+        payload = event.get("payload")
+        if isinstance(payload, str):
+            event["payload_pretty"] = payload
+        elif payload is not None:
+            event["payload_pretty"] = json.dumps(payload, ensure_ascii=False, indent=2)
+        else:
+            event["payload_pretty"] = ""
     return {
         "run_id": run_id,
-        "events": lines,
+        "events": events,
         "tail": tail,
-        "path": str(events_path),
+        "path": str(run_path / "events.jsonl"),
     }
 
 
