@@ -43,6 +43,10 @@ from app.runs import (
     get_artifact_path,
     get_events,
     get_run_artifacts,
+    get_stage_decision,
+    get_stage_output,
+    get_stage_prompt,
+    get_token_usage,
     list_runs,
     runs_dir,
 )
@@ -601,6 +605,38 @@ async def api_run_artifact(run_id: str, name: str) -> Any:
         "name": name,
         "content": path.read_text(encoding="utf-8", errors="replace"),
     }
+
+
+@router.get("/api/runs/{run_id}/stages/{stage_index}/prompt")
+async def api_run_stage_prompt(run_id: str, stage_index: int) -> Dict[str, Any]:
+    try:
+        return get_stage_prompt(run_id, stage_index)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/api/runs/{run_id}/stages/{stage_index}/output")
+async def api_run_stage_output(run_id: str, stage_index: int) -> Dict[str, Any]:
+    try:
+        return get_stage_output(run_id, stage_index)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/api/runs/{run_id}/stages/{stage_index}/decision")
+async def api_run_stage_decision(run_id: str, stage_index: int) -> Dict[str, Any]:
+    try:
+        return get_stage_decision(run_id, stage_index)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/api/runs/{run_id}/token-usage")
+async def api_run_token_usage(run_id: str) -> Dict[str, Any]:
+    try:
+        return get_token_usage(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 @router.post("/api/models")
 async def api_create_model(request: Request) -> Dict[str, Any]:
