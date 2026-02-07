@@ -4,6 +4,8 @@ import json
 from typing import Any, Dict, List, Tuple
 
 from app.validator.schema import (
+    CompressedScript,
+    CompressedSpec,
     ControlDecision,
     ErrorLocalization,
     FinalValidatorLabel,
@@ -57,6 +59,29 @@ def _default_soft_checks(hard_checks: HardChecks) -> SoftChecks:
         completeness=base,
         clarity=base,
         overall=base,
+    )
+
+
+def compress_user_prompt_to_script(user_prompt: str) -> CompressedScript:
+    normalized = " ".join(str(user_prompt or "").strip().split())
+    intent = normalized[:160] if normalized else "Clarify user intent."
+    lines = [line.strip() for line in str(user_prompt or "").splitlines()]
+    features: List[str] = []
+    for line in lines:
+        if not line:
+            continue
+        if line.startswith(("-", "*")):
+            features.append(line.lstrip("-* ").strip())
+        elif ":" in line and len(features) < 5:
+            features.append(line.split(":", 1)[0].strip())
+    if not features and normalized:
+        features = [normalized[:120]]
+    return CompressedScript(
+        task_id="task",
+        intent=intent,
+        spec=CompressedSpec(features=features),
+        constraints=[],
+        budgets={},
     )
 
 
@@ -217,6 +242,11 @@ def validate_request(record: RequestRecord) -> FinalValidatorLabel:
         next_actions=next_actions,
         optional_patch=None,
         retry_prompt=retry_prompt,
+        script=compress_user_prompt_to_script(record.response_text),
+        current_scope=[],
+        allowed_actions=[],
+        token_budget=None,
+        constraints=[],
     )
 
     return FinalValidatorLabel(

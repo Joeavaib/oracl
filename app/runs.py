@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from app.event_store import (
     RUN_COMPLETED,
     RUN_CREATED,
+    RUN_FAILED,
     RUN_STARTED,
     STAGE_COMPLETED,
     STAGE_STARTED,
@@ -17,8 +18,9 @@ from app.event_store import (
     list_events,
 )
 from app.pipelines_registry import get_pipeline, resolve_model_snapshots
-from app.validator.engine import validate_request
-from app.validator.schema import FinalValidatorLabel, RequestRecord
+from app.stage_runner import StageRunnerError, run_stage
+from app.validator.engine import compress_user_prompt_to_script, validate_request
+from app.validator.schema import FinalValidatorLabel, OrchestraBriefing, RequestRecord
 
 
 MAX_PREVIEW_BYTES = 200 * 1024
@@ -102,8 +104,37 @@ def _file_preview(path: Path, max_bytes: int = MAX_PREVIEW_BYTES) -> Dict[str, A
         "content": content,
     }
 
+def _build_input_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "goal": payload.get("goal") or payload.get("user_prompt") or "",
+        "user_prompt": payload.get("user_prompt") or "",
+        "repo_root": payload.get("repo_root") or "",
+        "constraints": payload.get("constraints") or [],
+        "pipeline_id": payload.get("pipeline_id") or "",
+    }
 
-def create_stub_run(payload: Dict[str, Any]) -> str:
+
+def _initial_orchestra_briefing(user_prompt: str) -> OrchestraBriefing:
+    return OrchestraBriefing(
+        known_correct=[],
+        uncertain_or_needs_check=[],
+        missing_inputs=[],
+        next_actions=[
+            "Summarize the task intent.",
+            "Follow constraints.",
+            "Produce strict JSON output.",
+        ],
+        optional_patch=None,
+        retry_prompt="No retry required.",
+        script=compress_user_prompt_to_script(user_prompt),
+        current_scope=[],
+        allowed_actions=[],
+        token_budget=None,
+        constraints=[],
+    )
+
+
+def create_run(payload: Dict[str, Any]) -> str:
     pipeline_id = payload.get("pipeline_id")
     if not pipeline_id:
         raise ValueError("pipeline_id is required")
@@ -114,14 +145,8 @@ def create_stub_run(payload: Dict[str, Any]) -> str:
     run_path = runs_dir() / run_id
     run_path.mkdir(parents=True, exist_ok=True)
 
-    input_payload = {
-        "goal": payload.get("goal") or payload.get("user_prompt") or "",
-        "user_prompt": payload.get("user_prompt") or "",
-        "repo_root": payload.get("repo_root") or "",
-        "constraints": payload.get("constraints") or [],
-        "pipeline_id": pipeline_snapshot["id"],
-    }
-    created_at_dt = datetime.now(timezone.utc)
+    input_payload = _build_input_payload(payload)
+    input_payload["pipeline_id"] = pipeline_snapshot["id"]
     _write_json(run_path / "input.json", input_payload)
     _write_json(run_path / "pipeline_snapshot.json", pipeline_snapshot)
     _write_json(
@@ -142,6 +167,22 @@ def create_stub_run(payload: Dict[str, Any]) -> str:
             "inputs": {"user_prompt": input_payload["user_prompt"]},
         },
     )
+    _write_json(
+        run_path / "validator_step_03_compress.json",
+        _initial_orchestra_briefing(input_payload["user_prompt"]).dict(),
+    )
+
+    append_event(run_id, RUN_CREATED, {"created_at": created_at})
+
+    return run_id
+
+
+def create_stub_run(payload: Dict[str, Any]) -> str:
+    run_id = create_run(payload)
+    run_path = runs_dir() / run_id
+    created_at_dt = datetime.now(timezone.utc)
+    input_payload = _read_json(run_path / "input.json") or _build_input_payload(payload)
+    pipeline_snapshot = _read_json(run_path / "pipeline_snapshot.json") or {}
     pre_request = RequestRecord(
         request_id=f"{run_id}-validator-pre-planner",
         created_at=created_at_dt,
@@ -240,8 +281,7 @@ def create_stub_run(payload: Dict[str, Any]) -> str:
         },
     )
 
-    append_event(run_id, RUN_CREATED, {"created_at": created_at})
-    append_event(run_id, RUN_STARTED, {"pipeline_id": pipeline_snapshot["id"]})
+    append_event(run_id, RUN_STARTED, {"pipeline_id": pipeline_snapshot.get("id")})
     append_event(
         run_id,
         STAGE_STARTED,
@@ -293,6 +333,68 @@ def create_stub_run(payload: Dict[str, Any]) -> str:
     append_event(run_id, RUN_COMPLETED, {"status": "done"})
 
     return run_id
+
+
+def execute_run_auto(run_id: str) -> None:
+    run_path = _safe_run_dir(run_id)
+    input_payload = _read_json(run_path / "input.json") or {}
+    briefing = _read_json(run_path / "validator_step_03_compress.json")
+    if not briefing:
+        briefing = _initial_orchestra_briefing(input_payload.get("user_prompt") or "").dict()
+    pipeline_snapshot = _read_json(run_path / "pipeline_snapshot.json") or {}
+    model_snapshots = _read_json(run_path / "model_snapshots.json") or {}
+
+    steps = model_snapshots.get("steps") or []
+    if not isinstance(steps, list):
+        raise ValueError("model_snapshots missing steps")
+
+    append_event(run_id, RUN_STARTED, {"pipeline_id": pipeline_snapshot.get("id")})
+
+    try:
+        planner_output: Optional[Dict[str, Any]] = None
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            role = step.get("role")
+            stage_type = step.get("step") or role or "stage"
+            if role not in {"planner", "coder"}:
+                continue
+
+            stage_payload = dict(input_payload)
+            stage_payload["orchestra_briefing"] = briefing
+            if role == "coder" and planner_output is not None:
+                stage_payload["planner_output"] = planner_output
+
+            output_payload = run_stage(
+                run_id=run_id,
+                stage_type=stage_type,
+                model_snapshot=step,
+                input_payload=stage_payload,
+            )
+            if role == "planner":
+                planner_output = output_payload
+
+        _write_json(
+            run_path / "state_final.json",
+            {
+                "run_id": run_id,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "status": "done",
+            },
+        )
+        append_event(run_id, RUN_COMPLETED, {"status": "done"})
+    except (StageRunnerError, ValueError) as exc:
+        _write_json(
+            run_path / "state_final.json",
+            {
+                "run_id": run_id,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "status": "failed",
+                "error": str(exc),
+            },
+        )
+        append_event(run_id, RUN_FAILED, {"error": str(exc)})
+        raise
 
 
 def _detect_created_at(run_path: Path) -> str:
