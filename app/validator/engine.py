@@ -187,6 +187,7 @@ def validate_request(record: RequestRecord) -> FinalValidatorLabel:
             decision="accept",
             stop_conditions=[],
             route_to="next_node",
+            max_retries=0,
         )
     elif schema_valid:
         minimal_rationale = "Hard checks passed, but soft scores indicate a quality gap."
@@ -205,6 +206,7 @@ def validate_request(record: RequestRecord) -> FinalValidatorLabel:
             retry_strategy="quality_review",
             stop_conditions=["max_retries_reached"],
             route_to="same_node",
+            max_retries=0,
         )
     else:
         missing_required = [
@@ -233,6 +235,7 @@ def validate_request(record: RequestRecord) -> FinalValidatorLabel:
             retry_strategy="schema_repair",
             stop_conditions=["max_retries_reached"],
             route_to="same_node",
+            max_retries=0,
         )
 
     orchestra_briefing = OrchestraBriefing(

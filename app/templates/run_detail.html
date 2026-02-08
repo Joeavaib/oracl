@@ -17,6 +17,95 @@
 </section>
 
 <section class="card">
+  <h3>TMP-S Renderer</h3>
+  <p class="hint">TMP-S Zeilen werden geparst und als Debug-Ansicht gerendert. Legacy View zeigt parsed.json.</p>
+  {% for view in tmp_s_views %}
+  <div class="tmp-s-card">
+    <div class="tmp-s-header">
+      <h4>{{ view.label }}</h4>
+      {% if view.audit.verdict %}
+      <span class="badge verdict-{{ view.verdict_badge }}">{{ view.verdict_badge }}</span>
+      {% endif %}
+      {% if view.control.decision_badge %}
+      <span class="badge decision-{{ view.control.decision_badge }}">{{ view.control.decision_badge }}</span>
+      {% endif %}
+    </div>
+    {% if view.raw_text %}
+    <div class="tmp-s-grid">
+      <div>
+        <h5>Raw TMP-S</h5>
+        <pre class="code">{{ view.raw_text }}</pre>
+      </div>
+      <div>
+        <h5>Parsed View</h5>
+        <div class="tmp-s-section">
+          <strong>Audit</strong>
+          <div class="tmp-s-kv">Hard4: {{ view.audit.hard4 }}</div>
+          <div class="tmp-s-kv">Soft4: {{ view.audit.soft4 }}</div>
+          <div class="tmp-s-kv">Verdict: {{ view.audit.verdict }}</div>
+          <div class="tmp-s-kv">Rationale: {{ view.audit.rationale }}</div>
+        </div>
+        <div class="tmp-s-section">
+          <strong>Control</strong>
+          <div class="tmp-s-kv">Decision: {{ view.control.decision }}</div>
+          <div class="tmp-s-kv">Strategy: {{ view.control.strategy }}</div>
+          <div class="tmp-s-kv">Max Retries: {{ view.control.max_retries }}</div>
+          <div class="tmp-s-kv">Focus: {{ view.control.focus }}</div>
+        </div>
+        <div class="tmp-s-section">
+          <strong>Errors</strong>
+          {% if view.errors %}
+            {% for err in view.errors %}
+            <div class="tmp-s-error">
+              <button class="link-button tmp-s-path" data-path="{{ err.path }}">{{ err.path }}</button>
+              <span class="badge severity-{{ err.severity_badge }}">{{ err.severity_badge }}</span>
+              <span class="tmp-s-hint">{{ err.fix_hint }}</span>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="hint">Keine Errors.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="tmp-s-grid">
+      <div>
+        <h5>Legacy View (parsed.json)</h5>
+        {% if view.legacy_payload %}
+        <pre class="code">{{ view.legacy_payload | tojson(indent=2) }}</pre>
+        {% else %}
+        <p class="hint">Keine parsed.json vorhanden.</p>
+        {% endif %}
+      </div>
+      <div>
+        <h5>Current Validator JSON (minimal)</h5>
+        {% if view.control_payload %}
+        <pre class="code">{{ view.control_payload | tojson(indent=2) }}</pre>
+        {% else %}
+        <p class="hint">Keine Validator JSON vorhanden.</p>
+        {% endif %}
+      </div>
+    </div>
+    <div class="tmp-s-section">
+      <strong>Current Scope</strong>
+      {% if view.current_scope %}
+      <ul class="scope-list">
+        {% for item in view.current_scope %}
+        <li class="scope-item" data-path="{{ item }}">{{ item }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="hint">Kein Scope hinterlegt.</div>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="hint">Keine TMP-S Artefakte gefunden.</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+<section class="card">
   <h3>Artefakte</h3>
   <p class="hint">Vorschauen sind auf {{ max_preview_kb }} KB begrenzt. Für große Dateien den Download verwenden.</p>
   {% for name, artifact in run.artifacts.items() %}
@@ -45,4 +134,16 @@
 >
   {% include "partials/events.html" %}
 </section>
+<script>
+  document.addEventListener("click", (event) => {
+    const target = event.target.closest(".tmp-s-path");
+    if (!target) return;
+    const path = target.dataset.path;
+    if (!path) return;
+    const scopeItems = document.querySelectorAll(".scope-item");
+    scopeItems.forEach((item) => {
+      item.classList.toggle("highlight", item.dataset.path === path);
+    });
+  });
+</script>
 {% endblock %}

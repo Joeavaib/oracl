@@ -19,13 +19,14 @@ Dieses Dokument hält die **Start‑Pipeline** fest:
 
 ### 0.2 Validator
 Der Validator ist dein **Dirigent**:
-- validiert **Schema + harte Regeln**
+- validiert **harte Regeln**
 - bewertet (Rubrik/Heuristiken)
 - entscheidet **accept / retry / reroute / escalate / abort**
 - komprimiert den Kontext für den nächsten Schritt (“handoff brief”)
 
 ### 0.3 “Einheitliche Verträge”
-Alles, was ein Modell ausgibt, muss **strukturierte JSON‑Ausgaben** liefern (Pydantic‑Schemas).  
+Planner und Coder liefern weiterhin **strukturierte JSON‑Ausgaben** (Pydantic‑Schemas).  
+Der **Validator** liefert **keinen JSON‑Contract**, sondern **TMP‑S Zeilen** (TMP‑S v2.2).  
 Damit werden:
 - Retries deterministisch
 - Routing sauber
@@ -44,11 +45,11 @@ FastAPI Gateway  (ein Entry)
     v
 LangGraph Orchestrator
     |
-    +--> Validator Node (PydanticAI)  ---> decision + handoff_brief
+    +--> Validator Node (TMP‑S)       ---> TMP‑S lines
     |
     +--> Planner Node (LLM)           ---> PlannerOutput
     |
-    +--> Validator Node (PydanticAI)  ---> decision + handoff_brief
+    +--> Validator Node (TMP‑S)       ---> TMP‑S lines
     |
     +--> Coder Node (LLM)             ---> CoderOutput
     |
@@ -64,7 +65,7 @@ Result (CoderOutput + Logs/Artifacts)
 
 ### 2.1 In Scope
 - Pipeline: **V→P→V→C**
-- Strikte Output‑Schemas: ValidatorDecision, PlannerOutput, CoderOutput
+- Strikte Output‑Schemas: PlannerOutput, CoderOutput (Validator liefert TMP‑S, Orchestrator parsed → ValidatorDecision)
 - Standardisierte **Retry‑Mechanik** (schema repair / reduce scope / ask for missing context)
 - Persistenz: Run‑Ordner mit Request/Outputs/Decisions
 - Minimaler “Tool‑Slot” für Retrieval (auch wenn index engine später stärker wird)
@@ -129,9 +130,35 @@ Minimaler Zustand, der von Node zu Node fließt:
 }
 ```
 
-### 3.2 ValidatorDecision (für jeden Validator‑Step)
-**Dieser Output ist der zentrale Contract.**  
-Er steuert die Pipeline und bildet später Trainingsdaten für deinen Validator.
+### 3.2 ValidatorDecision (internes Resultat pro Validator‑Step)
+**Der Validator liefert TMP‑S**, die Orchestrierung **parsed TMP‑S → ValidatorDecision**.  
+Dieses Ergebnis steuert die Pipeline und bildet später Trainingsdaten für deinen Validator.
+
+**Validator‑Output (TMP‑S v2.2, nur Zeilen):**
+
+**Kanonische Spezifikation (für euren Code):**
+- TMP‑S v2.2 = TMP‑S v2.1 (aus PDF) + folgende v2.2‑Erweiterung für den Run‑Kernel.
+- Zeilenprefixe: `V`, `A`, `E`, `B`, `C`
+- Reihenfolge: `V? → A → E* → B{3..7} → C`
+- Trennzeichen: Pipes `|` **ohne Spaces**, keine Extra‑Texte, Wortlimits beachten
+- `A`: `hard4|soft4|verdict|rationale`
+- `E`: `path|severity|fix_hint`
+- `B`: `pri:agent|action`
+- `C`: `decision|strategy|max_retries|focus`
+
+```text
+V?
+A|hard4|soft4|verdict|rationale
+E|path|severity|fix_hint
+B|pri:agent|action
+B|pri:agent|action
+B|pri:agent|action
+C|decision|strategy|max_retries|focus
+```
+
+**Hinweis:** Schema‑Validität hängt nicht an JSON‑Keys/Allowed‑Fields. Felder wie
+`run_config` führen daher nicht mehr zu Validator‑Fails, solange die TMP‑S‑Ausgabe
+valid ist.
 
 ```json
 {
@@ -242,18 +269,19 @@ Keine Markdown-Blöcke. Keine Erklärtexte außerhalb des JSON.
 ```
 
 ### 5.3 Validator — System Prompt (Template)
-- Fokus: Schema, harte Regeln, Routing, Kompression.
-- Output: **nur JSON** gemäß ValidatorDecision.
+- Fokus: harte Regeln, Routing, Kompression.
+- Output: **nur TMP‑S Zeilen** (TMP‑S v2.2).
 
 ```text
 Du bist VALIDATOR. Du bewertest den Output des vorherigen Nodes.
 Aufgaben:
-1) Prüfe: Schema korrekt? harte Regeln erfüllt?
+1) Prüfe: harte Regeln erfüllt?
 2) Entscheide action: accept/retry/reroute/escalate/abort
 3) Erzeuge handoff_brief: komprimiert & exakt, damit der nächste Node effizient arbeiten kann.
 
-Ausgabe: ausschließlich gültiges JSON im Schema ValidatorDecision.
-Keine Markdown-Blöcke. Keine Erklärtexte außerhalb des JSON.
+Ausgabe: ausschließlich TMP‑S Zeilen gemäß TMP‑S v2.2.
+Pipes `|` ohne Spaces, keine Extra‑Texte.
+Keine Markdown-Blöcke. Keine Erklärtexte außerhalb der TMP‑S Zeilen.
 ```
 
 ---
@@ -272,7 +300,7 @@ Decision:
 
 ### 6.2 Stage: Planner
 Input:
-- user_prompt + validator.handoff_brief + context_snippets
+- user_prompt + orchestrator.handoff_brief (aus TMP‑S) + context_snippets
 Planner erzeugt PlannerOutput.
 
 ### 6.3 Stage: Validator (post_planner)
@@ -286,7 +314,7 @@ Decision:
 
 ### 6.4 Stage: Coder
 Input:
-- PlannerOutput + validator.handoff_brief + context_snippets
+- PlannerOutput + orchestrator.handoff_brief (aus TMP‑S) + context_snippets
 Coder erzeugt CoderOutput.
 
 > v0.1 endet hier. (Optional später: final validator + automatic tool verify)
@@ -312,9 +340,11 @@ Pro Run:
 runs/<run_id>/
   input.json
   state_initial.json
-  validator_pre_planner.json
+  validator_pre_planner.tmps
+  validator_pre_planner.json (parsed)
   planner_output.json
-  validator_post_planner.json
+  validator_post_planner.tmps
+  validator_post_planner.json (parsed)
   coder_output.json
   state_final.json
   events.jsonl
@@ -340,10 +370,10 @@ Du erzeugst Trainingsbeispiele aus echten Runs:
 
 ## 10. Implementations‑Roadmap (kurz, praktisch)
 
-1) **Schemas** als Pydantic Modelle (ValidatorDecision, PlannerOutput, CoderOutput, PipelineState)
+1) **Schemas** als Pydantic Modelle (ValidatorDecision intern, PlannerOutput, CoderOutput, PipelineState)
 2) **LangGraph**: StateGraph mit 4 Nodes (validator_pre, planner, validator_post, coder)
 3) **LLM Adapter**: ein einheitlicher `call_llm(model, messages) -> text`
-4) **PydanticAI** für Validator (und optional auch für Spezialisten, um JSON‑Parsing zu erzwingen)
+4) **TMP‑S Parser** im Orchestrator (Validator liefert TMP‑S, Spezialisten liefern JSON)
 5) **Run Storage** + events.jsonl
 6) Optional: Retrieval‑Tool Stub, damit `reroute=retrieve_context` schon “lebt”
 

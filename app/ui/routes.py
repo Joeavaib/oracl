@@ -53,6 +53,7 @@ from app.runs import (
 from app.runtime_llamacpp import list_instances as list_llamacpp_instances
 from app.runtime_llamacpp import start_instance as start_llamacpp_instance
 from app.runtime_llamacpp import stop_instance as stop_llamacpp_instance
+from protocols.tmp_s_v22 import parse_tmp_s
 
 
 router = APIRouter()
@@ -119,6 +120,110 @@ def _model_form_context(
         "roles": sorted(MODEL_ROLES),
         "models_by_role": models_by_role,
     }
+
+
+def _load_text(path: Path) -> Optional[str]:
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def _load_json(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _badge_decision(value: str) -> str:
+    normalized = (value or "").lower()
+    if normalized in {"a", "accept"}:
+        return "A"
+    if normalized in {"r", "retry", "retry_same_node"}:
+        return "R"
+    if normalized in {"x", "reroute"}:
+        return "X"
+    if normalized in {"e", "escalate", "abort"}:
+        return "E"
+    return "R"
+
+
+def _badge_verdict(value: str) -> str:
+    if not value:
+        return "?"
+    return value.strip().upper()[:1]
+
+
+def _badge_severity(value: str) -> str:
+    normalized = (value or "").lower()
+    if normalized in {"critical", "c"}:
+        return "C"
+    if normalized in {"high", "h"}:
+        return "H"
+    if normalized in {"medium", "m"}:
+        return "M"
+    return "L"
+
+
+def _build_tmp_s_views(run_id: str) -> List[Dict[str, Any]]:
+    run_path = runs_dir() / run_id
+    stages = [
+        ("validator_pre_planner", "Validator Pre-Planner"),
+        ("validator_post_planner", "Validator Post-Planner"),
+    ]
+    views: List[Dict[str, Any]] = []
+    for stage_id, label in stages:
+        tmp_s_path = run_path / f"{stage_id}.tmp_s.txt"
+        raw_text = _load_text(tmp_s_path)
+        parsed_path = run_path / f"{stage_id}.parsed.json"
+        parsed_payload = _load_json(parsed_path)
+        control_payload = _load_json(run_path / f"{stage_id}.json") or {}
+        briefing = _load_json(run_path / f"{stage_id}_step_03_compress.json") or {}
+        current_scope = briefing.get("current_scope") or []
+        audit = {}
+        errors = []
+        control = {}
+        if raw_text:
+            parsed = parse_tmp_s(raw_text)
+            audit = {
+                "hard4": parsed.audit.hard4,
+                "soft4": parsed.audit.soft4,
+                "verdict": parsed.audit.verdict,
+                "rationale": parsed.audit.rationale,
+            }
+            errors = [
+                {
+                    "path": err.path,
+                    "severity": err.severity,
+                    "severity_badge": _badge_severity(err.severity),
+                    "fix_hint": err.fix_hint,
+                }
+                for err in parsed.errors
+            ]
+            control = {
+                "decision": parsed.control.decision,
+                "decision_badge": _badge_decision(parsed.control.decision),
+                "strategy": parsed.control.strategy,
+                "max_retries": parsed.control.max_retries,
+                "focus": parsed.control.focus,
+            }
+        views.append(
+            {
+                "stage_id": stage_id,
+                "label": label,
+                "raw_text": raw_text,
+                "parsed_payload": parsed_payload,
+                "legacy_payload": parsed_payload,
+                "control_payload": control_payload,
+                "audit": audit,
+                "errors": errors,
+                "control": control,
+                "verdict_badge": _badge_verdict(audit.get("verdict", "")),
+                "decision_badge": control.get("decision_badge", ""),
+                "current_scope": current_scope,
+            }
+        )
+    return views
 
 
 def _parse_list_field(value: Optional[str]) -> List[str]:
@@ -464,6 +569,7 @@ async def run_detail(request: Request, run_id: str) -> HTMLResponse:
     try:
         run = get_run_artifacts(run_id)
         events = get_events(run_id, tail=200)
+        tmp_s_views = _build_tmp_s_views(run_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return templates.TemplateResponse(
@@ -472,6 +578,7 @@ async def run_detail(request: Request, run_id: str) -> HTMLResponse:
             "request": request,
             "run": run,
             "events": events,
+            "tmp_s_views": tmp_s_views,
             "max_preview_kb": MAX_PREVIEW_BYTES // 1024,
         },
     )
