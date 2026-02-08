@@ -50,10 +50,16 @@ def _read_json(path: Path) -> Optional[Dict[str, Any]]:
         return json.load(handle)
 
 
+def _json_default(payload: Any) -> str:
+    if isinstance(payload, datetime):
+        return payload.isoformat()
+    raise TypeError(f"Object of type {payload.__class__.__name__} is not JSON serializable")
+
+
 def _write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        json.dump(payload, handle, ensure_ascii=False, indent=2, default=_json_default)
 
 
 def _write_validator_artifacts(
