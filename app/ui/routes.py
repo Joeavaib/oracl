@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from datetime import datetime, timezone
@@ -9,7 +10,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -63,6 +64,9 @@ from protocols.tmp_s_v22 import parse_tmp_s
 router = APIRouter()
 
 templates = Jinja2Templates(directory="app/templates")
+templates.env.globals["debug"] = os.getenv("DEBUG") == "1"
+
+logger = logging.getLogger(__name__)
 
 _OPENAI_DISCOVERY_CACHE: Dict[str, Dict[str, Any]] = {}
 _OPENAI_DISCOVERY_TTL_S = 30
@@ -517,12 +521,16 @@ async def ui_discover_openai_test(base_url: str | None = None) -> HTMLResponse:
 @router.get("/ui/models/discover/ollama_models", response_class=HTMLResponse)
 async def ui_discover_ollama_models(base_url: str | None = None) -> HTMLResponse:
     if not base_url:
-        raise HTTPException(status_code=400, detail="base_url is required")
+        logger.warning("Ollama discovery missing base_url")
+        return HTMLResponse(content="<p class=\"warning\">Ollama base_url fehlt.</p>")
     try:
         normalized = _normalize_ollama_base_url(base_url)
         model_ids = list_ollama_models(normalized)
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail="Discovery failed") from exc
+        logger.exception("Ollama discovery failed for base_url=%s", base_url)
+        return HTMLResponse(
+            content=f"<p class=\"warning\">Ollama nicht erreichbar: {exc}</p>"
+        )
     options = "\n".join(f"<option value=\"{model_id}\"></option>" for model_id in model_ids)
     html = f"<datalist id=\"ollama-models\">{options}</datalist>"
     return HTMLResponse(content=html)
@@ -634,7 +642,10 @@ async def run_events_partial(request: Request, run_id: str, tail: int = 200) -> 
     try:
         events = get_events(run_id, tail=tail)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return HTMLResponse(
+            content=f"<div class=\"warning\">Events konnten nicht geladen werden: {exc}</div>",
+            status_code=200,
+        )
     return templates.TemplateResponse(
         "partials/events.html",
         {"request": request, "events": events},
