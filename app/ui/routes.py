@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from datetime import datetime, timezone
 import urllib.error
@@ -50,9 +51,12 @@ from app.runs import (
     list_runs,
     runs_dir,
 )
+from app.runtime_llamacpp import healthcheck as healthcheck_llamacpp
 from app.runtime_llamacpp import list_instances as list_llamacpp_instances
 from app.runtime_llamacpp import start_instance as start_llamacpp_instance
 from app.runtime_llamacpp import stop_instance as stop_llamacpp_instance
+from app.runtime_ollama import healthcheck as healthcheck_ollama
+from app.runtime_ollama import list_models as list_ollama_models
 from protocols.tmp_s_v22 import parse_tmp_s
 
 
@@ -119,6 +123,7 @@ def _model_form_context(
         "notice": notice,
         "roles": sorted(MODEL_ROLES),
         "models_by_role": models_by_role,
+        "ollama_base_url": os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
     }
 
 
@@ -296,6 +301,15 @@ def _fetch_openai_models(base_url: str) -> List[str]:
         for item in data
         if isinstance(item, dict) and isinstance(item.get("id"), str)
     ]
+
+
+def _normalize_ollama_base_url(base_url: str) -> str:
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError("base_url is required")
+    parsed = urllib.parse.urlparse(base_url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("base_url must include scheme and host")
+    return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", ""))
 
 
 def _get_cached_openai_models(base_url: str) -> List[str]:
@@ -481,7 +495,7 @@ async def ui_discover_openai_models(base_url: str | None = None) -> HTMLResponse
     options = "\n".join(
         f"<option value=\"{model_id}\"></option>" for model_id in model_ids
     )
-    html = f"<datalist id=\"vllm-models\">{options}</datalist>"
+    html = f"<datalist id=\"openai-models\">{options}</datalist>"
     return HTMLResponse(content=html)
 
 
@@ -498,6 +512,37 @@ async def ui_discover_openai_test(base_url: str | None = None) -> HTMLResponse:
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError):
         return HTMLResponse(content="<p class=\"warning\">FAIL</p>")
     return HTMLResponse(content="<p class=\"hint\">OK</p>")
+
+
+@router.get("/ui/models/discover/ollama_models", response_class=HTMLResponse)
+async def ui_discover_ollama_models(base_url: str | None = None) -> HTMLResponse:
+    if not base_url:
+        raise HTTPException(status_code=400, detail="base_url is required")
+    try:
+        normalized = _normalize_ollama_base_url(base_url)
+        model_ids = list_ollama_models(normalized)
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Discovery failed") from exc
+    options = "\n".join(f"<option value=\"{model_id}\"></option>" for model_id in model_ids)
+    html = f"<datalist id=\"ollama-models\">{options}</datalist>"
+    return HTMLResponse(content=html)
+
+
+@router.get("/ui/models/discover/ollama_test", response_class=HTMLResponse)
+async def ui_discover_ollama_test(base_url: str | None = None) -> HTMLResponse:
+    if not base_url:
+        raise HTTPException(status_code=400, detail="base_url is required")
+    try:
+        normalized = _normalize_ollama_base_url(base_url)
+        result = healthcheck_ollama(normalized)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    ok = bool(result.get("ok"))
+    detail = result.get("error")
+    if ok:
+        return HTMLResponse(content="<p class=\"hint\">OK</p>")
+    suffix = f": {detail}" if detail else ""
+    return HTMLResponse(content=f"<p class=\"warning\">FAIL{suffix}</p>")
 
 
 @router.get("/ui/models/discover/vllm", response_class=HTMLResponse)
@@ -852,6 +897,32 @@ async def api_discovery_vllm_models(base_url: str | None = None) -> Dict[str, An
     return await api_discovery_openai_models(base_url=base_url)
 
 
+@router.get("/api/discovery/ollama_models")
+async def api_discovery_ollama_models(base_url: str | None = None) -> Dict[str, Any]:
+    if not base_url:
+        raise HTTPException(status_code=400, detail="base_url is required")
+    try:
+        normalized = _normalize_ollama_base_url(base_url)
+        model_ids = list_ollama_models(normalized)
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Discovery failed") from exc
+    return {"models": model_ids}
+
+
+@router.get("/api/discovery/ollama_test")
+async def api_discovery_ollama_test(base_url: str | None = None) -> Dict[str, Any]:
+    if not base_url:
+        raise HTTPException(status_code=400, detail="base_url is required")
+    try:
+        normalized = _normalize_ollama_base_url(base_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = healthcheck_ollama(normalized)
+    if not result.get("ok"):
+        raise HTTPException(status_code=502, detail=result.get("error") or "Healthcheck failed")
+    return {"ok": True, "mode": result.get("mode")}
+
+
 @router.get("/api/discovery/local_gguf")
 async def api_discovery_local_gguf() -> Dict[str, Any]:
     return {"models": list_local_gguf_models()}
@@ -863,6 +934,7 @@ async def api_llamacpp_start(request: Request) -> Dict[str, Any]:
     role = payload.get("role")
     model_path = payload.get("model_path")
     port = payload.get("port")
+    binary_path = payload.get("binary_path")
     ctx_size = payload.get("ctx_size")
     threads = payload.get("threads")
     extra_args: List[str] = []
@@ -876,6 +948,7 @@ async def api_llamacpp_start(request: Request) -> Dict[str, Any]:
             model_path=model_path,
             port=port,
             extra_args=extra_args or None,
+            binary_path=binary_path,
         )
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -897,3 +970,10 @@ async def api_llamacpp_stop(request: Request) -> Dict[str, Any]:
 @router.get("/api/runtimes/llamacpp/list")
 async def api_llamacpp_list() -> Dict[str, Any]:
     return {"instances": list_llamacpp_instances()}
+
+
+@router.get("/api/runtimes/llamacpp/health")
+async def api_llamacpp_health(base_url: str | None = None) -> Dict[str, Any]:
+    if not base_url:
+        raise HTTPException(status_code=400, detail="base_url is required")
+    return healthcheck_llamacpp(base_url)

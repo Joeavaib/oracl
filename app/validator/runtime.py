@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.llm_client import LLMClientError, chat_completions
+from app.runtime_llamacpp import ensure_runtime
 from app.validator.engine import compress_user_prompt_to_script, validate_request as deterministic_validate
 from app.validator.schema import (
     ControlDecision,
@@ -229,6 +230,15 @@ def validate_with_runtime(
     provider = model.get("provider")
     base_url = model.get("base_url")
     model_name = model.get("model_name")
+
+    if use_llm and provider == "llamacpp":
+        try:
+            runtime = ensure_runtime(model, role=model.get("role") or "validator")
+            base_url = runtime.get("base_url")
+            model_name = runtime.get("model_name")
+        except RuntimeError:
+            base_url = None
+            model_name = None
 
     if not use_llm or not provider or not base_url or not model_name:
         label = deterministic_validate(record)

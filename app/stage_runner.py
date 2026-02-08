@@ -16,6 +16,7 @@ from app.llm_client import LLMClientError, chat_completions
 from app.output_parser import extract_json
 from app.prompt_builder import build_prompt
 from app.paths import runs_dir
+from app.runtime_llamacpp import ensure_runtime
 
 
 class StageRunnerError(RuntimeError):
@@ -81,8 +82,17 @@ def run_stage(
         raise StageRunnerError("model_snapshot must be a dict")
 
     model = model_snapshot.get("model_snapshot") or model_snapshot
-    base_url = _normalize_base_url(model.get("base_url"))
-    model_name = model.get("model_name")
+    provider = model.get("provider")
+    if provider == "llamacpp":
+        try:
+            runtime = ensure_runtime(model, role=model.get("role") or stage_type)
+        except RuntimeError as exc:
+            raise StageRunnerError(str(exc)) from exc
+        base_url = _normalize_base_url(runtime.get("base_url"))
+        model_name = runtime.get("model_name")
+    else:
+        base_url = _normalize_base_url(model.get("base_url"))
+        model_name = model.get("model_name")
     if not base_url or not model_name:
         raise StageRunnerError("model_snapshot must include base_url and model_name")
 

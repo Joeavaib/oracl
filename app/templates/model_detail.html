@@ -41,78 +41,155 @@
         <p class="hint">Vorhandene Modelle für {{ model.role }}: {{ suggestions | join(", ") }}</p>
       {% endif %}
     {% endif %}
-    <label>
-      Provider
-      <input type="text" name="provider" value="{{ model.provider or "" }}" required />
-    </label>
-    <label>
-      Model Name
-      <input type="text" name="model_name" value="{{ model.model_name or "" }}" list="vllm-models" required />
-    </label>
-    <div class="stack">
-      <button
-        type="button"
-        class="button"
-        hx-get="/ui/models/discover/openai_models"
-        hx-include="[name='base_url']"
-        hx-target="#vllm-models-container"
-        hx-swap="innerHTML"
-      >
-        Modelle abrufen (llama.cpp · OpenAI-compat)
-      </button>
-      <button
-        type="button"
-        class="button"
-        hx-get="/ui/models/discover/openai_test"
-        hx-include="[name='base_url']"
-        hx-target="#vllm-connection-status"
-        hx-swap="innerHTML"
-      >
-        Test connection (llama.cpp · OpenAI-compat)
-      </button>
-      <div id="vllm-connection-status"></div>
-      <div id="vllm-models-container">
-        <datalist id="vllm-models"></datalist>
+    <p class="hint">Weights werden nicht geladen. Diese App verbindet sich mit einem Runtime-Server.</p>
+    <p class="hint">Provider bestimmt Runtime/Discovery/Auto-Start Verhalten.</p>
+    <input type="hidden" name="provider" id="provider" value="{{ model.provider or "" }}" />
+    <div class="tabs" data-tabs="provider">
+      <div class="tab-buttons">
+        <button type="button" class="tab-button" data-provider="ollama">Ollama</button>
+        <button type="button" class="tab-button" data-provider="llamacpp">llama.cpp</button>
+        <button type="button" class="tab-button" data-provider="openai">OpenAI-compat/vLLM</button>
       </div>
-    </div>
-    <div class="stack">
-      <button type="button" class="button" id="llamacpp-start">
-        Start llama-server
-      </button>
-      <button type="button" class="button" id="llamacpp-stop">
-        Stop llama-server
-      </button>
-      <button type="button" class="button" id="llamacpp-use-endpoint">
-        Use running endpoint as base_url
-      </button>
-      <input type="hidden" name="runtime_instance_id" id="llamacpp-instance-id" />
-      <div id="llamacpp-runtime-status" class="hint"></div>
-    </div>
-    <label>
-      Base URL
-      <input type="text" name="base_url" value="{{ model.base_url or "" }}" required />
-    </label>
-    <label>
-      Model Path (optional, local GGUF)
-      <input
-        type="text"
-        name="model_path"
-        value="{{ model.model_path or "" }}"
-        list="local-gguf-models"
-      />
-    </label>
-    <div class="stack">
-      <button
-        type="button"
-        class="button"
-        hx-get="/ui/models/discover/local_gguf"
-        hx-target="#local-gguf-models-container"
-        hx-swap="innerHTML"
-      >
-        Lokale GGUFs vorschlagen
-      </button>
-      <div id="local-gguf-models-container">
-        <datalist id="local-gguf-models"></datalist>
+      <div class="tab-panels">
+        <section class="tab-panel" data-provider="ollama">
+          <label>
+            Model Name
+            <input type="text" name="model_name" value="{{ model.model_name or "" }}" list="ollama-models" required />
+          </label>
+          <label>
+            Base URL
+            <input type="text" name="base_url" value="{{ model.base_url or ollama_base_url }}" placeholder="http://localhost:11434" required />
+          </label>
+          <div class="stack">
+            <button
+              type="button"
+              class="button"
+              hx-get="/ui/models/discover/ollama_models"
+              hx-include=".tab-panel.is-active [name='base_url']"
+              hx-target="#ollama-models-container"
+              hx-swap="innerHTML"
+            >
+              Modelle abrufen (Ollama API)
+            </button>
+            <button
+              type="button"
+              class="button"
+              hx-get="/ui/models/discover/ollama_test"
+              hx-include=".tab-panel.is-active [name='base_url']"
+              hx-target="#ollama-connection-status"
+              hx-swap="innerHTML"
+            >
+              Test connection
+            </button>
+            <div id="ollama-connection-status"></div>
+            <div id="ollama-models-container">
+              <datalist id="ollama-models"></datalist>
+            </div>
+          </div>
+        </section>
+        <section class="tab-panel" data-provider="llamacpp">
+          <label>
+            Model Name
+            <input type="text" name="model_name" value="{{ model.model_name or "" }}" required />
+          </label>
+          <label>
+            Base URL
+            <input type="text" name="base_url" value="{{ model.base_url or "" }}" placeholder="http://127.0.0.1:8001" required />
+          </label>
+          <label>
+            Model Path (local GGUF)
+            <input
+              type="text"
+              name="model_path"
+              value="{{ model.model_path or "" }}"
+              list="local-gguf-models"
+            />
+          </label>
+          <label>
+            Context Size (optional)
+            <input type="number" name="ctx_size" min="0" />
+          </label>
+          <label>
+            Threads (optional)
+            <input type="number" name="threads" min="0" />
+          </label>
+          <div class="stack">
+            <button
+              type="button"
+              class="button"
+              hx-get="/ui/models/discover/local_gguf"
+              hx-target="#local-gguf-models-container"
+              hx-swap="innerHTML"
+            >
+              Lokale GGUFs vorschlagen
+            </button>
+            <div id="local-gguf-models-container">
+              <datalist id="local-gguf-models"></datalist>
+            </div>
+          </div>
+          <label>
+            llama-server Binary (optional)
+            <input type="text" name="llamacpp_binary_path" placeholder="/usr/local/bin/llama-server" />
+          </label>
+          <div class="stack">
+            <button type="button" class="button" id="llamacpp-start">
+              Start llama-server
+            </button>
+            <button type="button" class="button" id="llamacpp-stop">
+              Stop llama-server
+            </button>
+            <button type="button" class="button" id="llamacpp-use-endpoint">
+              Use running endpoint as base_url
+            </button>
+            <input type="hidden" name="runtime_instance_id" id="llamacpp-instance-id" />
+            <div id="llamacpp-runtime-status" class="hint"></div>
+            <div id="llamacpp-health-status" class="hint"></div>
+            <div id="llamacpp-running-list" class="hint"></div>
+          </div>
+        </section>
+        <section class="tab-panel" data-provider="openai">
+          <label>
+            Provider Type
+            <select id="openai-provider-select">
+              <option value="openai-compatible" {% if model.provider == "openai-compatible" %}selected{% endif %}>OpenAI-compatible</option>
+              <option value="vllm" {% if model.provider == "vllm" %}selected{% endif %}>vLLM</option>
+            </select>
+          </label>
+          <label>
+            Model Name
+            <input type="text" name="model_name" value="{{ model.model_name or "" }}" list="openai-models" required />
+          </label>
+          <label>
+            Base URL
+            <input type="text" name="base_url" value="{{ model.base_url or "" }}" placeholder="https://host:port/v1" required />
+          </label>
+          <div class="stack">
+            <button
+              type="button"
+              class="button"
+              hx-get="/ui/models/discover/openai_models"
+              hx-include=".tab-panel.is-active [name='base_url']"
+              hx-target="#openai-models-container"
+              hx-swap="innerHTML"
+            >
+              Modelle abrufen (OpenAI-compat)
+            </button>
+            <button
+              type="button"
+              class="button"
+              hx-get="/ui/models/discover/openai_test"
+              hx-include=".tab-panel.is-active [name='base_url']"
+              hx-target="#openai-connection-status"
+              hx-swap="innerHTML"
+            >
+              Test connection
+            </button>
+            <div id="openai-connection-status"></div>
+            <div id="openai-models-container">
+              <datalist id="openai-models"></datalist>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
     <label>
@@ -173,19 +250,98 @@
 </section>
 <script>
   (() => {
+    const providerInput = document.getElementById("provider");
+    const tabButtons = document.querySelectorAll(".tab-button");
+    const tabPanels = document.querySelectorAll(".tab-panel");
+    const openaiProviderSelect = document.getElementById("openai-provider-select");
+    const ollamaBaseUrlInput = document.querySelector("[data-provider='ollama'] [name='base_url']");
+
+    const providerToTab = (provider) => {
+      if (provider === "llamacpp") return "llamacpp";
+      if (provider === "ollama") return "ollama";
+      if (provider === "openai-compatible" || provider === "vllm") return "openai";
+      return "ollama";
+    };
+
+    const setTab = (tab) => {
+      tabButtons.forEach((button) => {
+        button.classList.toggle("is-active", button.dataset.provider === tab);
+      });
+      tabPanels.forEach((panel) => {
+        const isActive = panel.dataset.provider === tab;
+        panel.classList.toggle("is-active", isActive);
+        panel.querySelectorAll("input, select, textarea, button").forEach((el) => {
+          if (el.type === "button") {
+            return;
+          }
+          el.disabled = !isActive;
+        });
+      });
+      if (tab === "openai") {
+        providerInput.value = openaiProviderSelect?.value || "openai-compatible";
+      } else if (tab === "ollama") {
+        providerInput.value = tab;
+        if (ollamaBaseUrlInput && !ollamaBaseUrlInput.value) {
+          ollamaBaseUrlInput.value = "http://127.0.0.1:11434";
+        }
+      } else {
+        providerInput.value = tab;
+      }
+    };
+
+    tabButtons.forEach((button) => {
+      button.addEventListener("click", () => setTab(button.dataset.provider));
+    });
+
+    openaiProviderSelect?.addEventListener("change", () => {
+      if (providerInput) {
+        providerInput.value = openaiProviderSelect.value;
+      }
+    });
+
+    setTab(providerToTab(providerInput?.value));
+
     const startButton = document.getElementById("llamacpp-start");
     const stopButton = document.getElementById("llamacpp-stop");
     const useButton = document.getElementById("llamacpp-use-endpoint");
     const statusEl = document.getElementById("llamacpp-runtime-status");
+    const healthEl = document.getElementById("llamacpp-health-status");
+    const runningListEl = document.getElementById("llamacpp-running-list");
     const instanceInput = document.getElementById("llamacpp-instance-id");
-    const modelPathInput = document.querySelector("[name='model_path']");
+    const modelPathInput = document.querySelector("[data-provider='llamacpp'] [name='model_path']");
+    const binaryPathInput = document.querySelector("[data-provider='llamacpp'] [name='llamacpp_binary_path']");
+    const ctxSizeInput = document.querySelector("[data-provider='llamacpp'] [name='ctx_size']");
+    const threadsInput = document.querySelector("[data-provider='llamacpp'] [name='threads']");
     const roleInput = document.querySelector("[name='role']");
-    const baseUrlInput = document.querySelector("[name='base_url']");
+    const baseUrlInput = document.querySelector("[data-provider='llamacpp'] [name='base_url']");
 
     const setStatus = (text, isError = false) => {
       statusEl.textContent = text;
       statusEl.classList.toggle("warning", isError);
       statusEl.classList.toggle("hint", !isError);
+    };
+
+    const setHealth = (text, isError = false) => {
+      if (!healthEl) {
+        return;
+      }
+      healthEl.textContent = text;
+      healthEl.classList.toggle("warning", isError);
+      healthEl.classList.toggle("hint", !isError);
+    };
+
+    const renderRunningList = (instances = []) => {
+      if (!runningListEl) {
+        return;
+      }
+      if (!instances.length) {
+        runningListEl.textContent = "Keine laufenden Instanzen.";
+        return;
+      }
+      const items = instances
+        .map((entry) => `${entry.role || "role"} @ ${entry.base_url || "unknown"}`)
+        .join(" · ");
+      runningListEl.textContent = `Running: ${items}`;
     };
 
     const fetchJson = async (url, options = {}) => {
@@ -206,6 +362,36 @@
       );
     };
 
+    const refreshRunning = async () => {
+      try {
+        const list = await fetchJson("/api/runtimes/llamacpp/list");
+        const instances = (list.instances || []).filter((entry) => entry.status === "running");
+        renderRunningList(instances);
+        return instances;
+      } catch (error) {
+        renderRunningList([]);
+        return [];
+      }
+    };
+
+    const refreshHealth = async (targetBaseUrl) => {
+      if (!targetBaseUrl) {
+        setHealth("Healthcheck: keine base_url.", true);
+        return;
+      }
+      try {
+        const params = new URLSearchParams({base_url: targetBaseUrl});
+        const result = await fetchJson(`/api/runtimes/llamacpp/health?${params.toString()}`);
+        if (result.ok) {
+          setHealth("Healthcheck: OK");
+        } else {
+          setHealth(`Healthcheck: ${result.error || "FAIL"}`, true);
+        }
+      } catch (error) {
+        setHealth(`Healthcheck: ${error.message}`, true);
+      }
+    };
+
     startButton?.addEventListener("click", async () => {
       if (!modelPathInput?.value) {
         setStatus("Bitte zuerst einen Model Path angeben.", true);
@@ -216,6 +402,15 @@
           model_path: modelPathInput.value,
           role: roleInput?.value,
         };
+        if (binaryPathInput?.value) {
+          payload.binary_path = binaryPathInput.value;
+        }
+        if (ctxSizeInput?.value) {
+          payload.ctx_size = Number(ctxSizeInput.value);
+        }
+        if (threadsInput?.value) {
+          payload.threads = Number(threadsInput.value);
+        }
         const data = await fetchJson("/api/runtimes/llamacpp/start", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
@@ -224,6 +419,8 @@
         instanceInput.value = data.id || "";
         statusEl.dataset.baseUrl = data.base_url || "";
         setStatus(`Gestartet auf ${data.base_url || "unknown"}.`);
+        await refreshRunning();
+        await refreshHealth(data.base_url);
       } catch (error) {
         setStatus(error.message, true);
       }
@@ -249,6 +446,8 @@
         instanceInput.value = "";
         statusEl.dataset.baseUrl = "";
         setStatus("Instanz gestoppt.");
+        await refreshRunning();
+        setHealth("Healthcheck: keine base_url.");
       } catch (error) {
         setStatus(error.message, true);
       }
@@ -271,10 +470,13 @@
           baseUrlInput.value = baseUrl;
         }
         setStatus(`base_url gesetzt: ${baseUrl}`);
+        await refreshHealth(baseUrl);
       } catch (error) {
         setStatus(error.message, true);
       }
     });
+
+    refreshRunning();
   })();
 </script>
 {% endblock %}

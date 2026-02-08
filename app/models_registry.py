@@ -38,7 +38,12 @@ def gguf_dir() -> Optional[Path]:
     env_value = os.getenv("GGUF_DIR")
     if env_value is not None and not env_value.strip():
         return None
-    return Path(env_value) if env_value else repo_root() / "models_gguf"
+    if env_value:
+        return Path(env_value)
+    fallback = Path.home() / "Models" / "gguf"
+    if fallback.exists():
+        return fallback
+    return repo_root() / "models_gguf"
 
 
 def _safe_model_path(model_id: str) -> Path:

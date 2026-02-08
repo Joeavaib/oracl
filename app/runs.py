@@ -19,6 +19,7 @@ from app.event_store import (
 )
 from app.paths import repo_root as paths_repo_root, runs_dir as paths_runs_dir
 from app.pipelines_registry import get_pipeline, resolve_model_snapshots
+from app.runtime_manager import ensure_runtime
 from app.stage_runner import StageRunnerError, run_stage
 from app.validator.engine import compress_user_prompt_to_script
 from app.validator.schema import FinalValidatorLabel, OrchestraBriefing, RequestRecord
@@ -651,10 +652,13 @@ def execute_run_auto(run_id: str) -> None:
         last_planner_payload: Optional[Dict[str, Any]] = None
         retry_counts: Dict[str, int] = {"planner": 0, "coder": 0}
         runner_max_retries = (input_payload.get("run_config") or {}).get("max_retries_per_stage", 2)
+        runtime_steps: List[Dict[str, Any]] = []
 
         for step in steps:
             if not isinstance(step, dict):
                 continue
+            step = ensure_runtime(step, run_id=run_id, run_path=run_path)
+            runtime_steps.append(step)
             role = step.get("role")
             stage_type = step.get("step") or role or "stage"
             stage_id = str(stage_type).strip().lower()
@@ -798,6 +802,8 @@ def execute_run_auto(run_id: str) -> None:
             if role == "planner":
                 planner_output = output_payload
 
+        if runtime_steps:
+            _write_json(run_path / "model_snapshots_runtime.json", {"steps": runtime_steps})
         _write_json(
             run_path / "state_final.json",
             {
@@ -942,6 +948,9 @@ def get_run_artifacts(run_id: str) -> Dict[str, Any]:
         "state_final.json": _file_preview(run_path / "state_final.json"),
         "pipeline_snapshot.json": _file_preview(run_path / "pipeline_snapshot.json"),
         "model_snapshots.json": _file_preview(run_path / "model_snapshots.json"),
+        "model_snapshots_runtime.json": _file_preview(
+            run_path / "model_snapshots_runtime.json"
+        ),
     }
     return {
         "run_id": run_id,
@@ -999,6 +1008,7 @@ def get_artifact_path(run_id: str, name: str) -> Path:
         "state_final.json",
         "pipeline_snapshot.json",
         "model_snapshots.json",
+        "model_snapshots_runtime.json",
         "events.jsonl",
     }
     if name not in allowed:
