@@ -94,6 +94,7 @@ class OrchestraBriefing(BaseModel):
 class ControlDecision(BaseModel):
     decision: Literal["accept", "retry_same_node", "reroute", "escalate", "abort"]
     retry_strategy: Optional[str] = None
+    max_retries: Optional[int] = None
     stop_conditions: List[str]
     route_to: Optional[str] = None
 

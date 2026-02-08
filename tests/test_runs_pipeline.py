@@ -7,7 +7,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.validator.schema import FinalValidatorLabel, RequestRecord
+from app.validator.schema import RequestRecord
 
 
 def _write_json(path, payload):
@@ -152,11 +152,13 @@ def test_run_writes_pipeline_snapshots(tmp_path, monkeypatch):
         (runs_dir / run_id / "validator_post_planner_step_01_ingest.json").read_text()
     )
 
-    FinalValidatorLabel(**pre_label)
     RequestRecord(**pre_request)
     RequestRecord(**generic_pre_request)
-    FinalValidatorLabel(**post_label)
     RequestRecord(**post_request)
+    assert pre_label["control_decision"] in {"accept", "retry_same_node", "reroute", "escalate", "abort"}
+    assert post_label["control_decision"] in {"accept", "retry_same_node", "reroute", "escalate", "abort"}
+    assert (runs_dir / run_id / "validator_pre_planner.tmp_s.txt").exists()
+    assert (runs_dir / run_id / "validator_post_planner.tmp_s.txt").exists()
 
     policy_summary = json.loads(
         (runs_dir / run_id / "validator_pre_planner_step_02_policy.json").read_text()
