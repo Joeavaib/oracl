@@ -91,6 +91,10 @@ def test_ui_smoke():
     client = TestClient(app)
     response = client.get("/ui")
     assert response.status_code == 200
+    assert "/static/vendor/htmx.js" in response.text
+    static_response = client.get("/static/vendor/htmx.js")
+    assert static_response.status_code == 200
+    assert "hx-get" in static_response.text
 
 
 def test_ui_models_new_page():

@@ -134,16 +134,5 @@
 >
   {% include "partials/events.html" %}
 </section>
-<script>
-  document.addEventListener("click", (event) => {
-    const target = event.target.closest(".tmp-s-path");
-    if (!target) return;
-    const path = target.dataset.path;
-    if (!path) return;
-    const scopeItems = document.querySelectorAll(".scope-item");
-    scopeItems.forEach((item) => {
-      item.classList.toggle("highlight", item.dataset.path === path);
-    });
-  });
-</script>
+<script src="/static/run_detail.js" defer></script>
 {% endblock %}

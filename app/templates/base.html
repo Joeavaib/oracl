@@ -5,13 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}Orchestrator UI{% endblock %}</title>
     <link rel="stylesheet" href="/static/app.css" />
-    <script
-      src="https://unpkg.com/htmx.org@1.9.12"
-      integrity="sha384-8MdCOrfT2ie9zzjb1JyF4eF2j3LrJz3vU9rW3M8Z+Jt2CLfN4o3l8XvT0C3L2u2k"
-      crossorigin="anonymous"
-    ></script>
+    <script src="/static/vendor/htmx.js" defer></script>
+    {% if debug %}
+    <script>
+      window.addEventListener("DOMContentLoaded", () => {
+        if (!window.htmx) console.error("HTMX not loaded!");
+      });
+      document.body.addEventListener("htmx:afterRequest", (event) => {
+        const requestConfig = event.detail?.requestConfig;
+        if (!requestConfig) return;
+        console.debug("HTMX:", requestConfig.verb, requestConfig.path);
+      });
+    </script>
+    {% endif %}
   </head>
-  <body>
+  <body hx-boost="false" hx-indicator="#global-spinner">
+    <div id="global-spinner" class="spinner htmx-indicator"></div>
     <header class="site-header">
       <div class="container">
         <h1>Backend-Orchester</h1>
