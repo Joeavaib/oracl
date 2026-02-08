@@ -13,17 +13,19 @@ def _system_prompt(stage_type: str) -> str:
     if stage == "PLANNER":
         return (
             "You are PLANNER. You do NOT write code. "
-            "Return strict JSON for PlannerOutput v0.1 only. "
-            "No Markdown and no extra text."
+            "Return TMP-S v2.2 lines only (no Markdown, no extra text). "
+            "Include a stage header S line. "
+            "Provide PlannerOutput JSON in an O line payload (no pipes)."
         )
     if stage == "CODER":
         return (
             "You are CODER. Implement the plan with a minimal unified diff. "
-            "Return strict JSON for CoderOutput v0.1 only. "
-            "No Markdown and no extra text."
+            "Return TMP-S v2.2 lines only (no Markdown, no extra text). "
+            "Include a stage header S line. "
+            "Provide CoderOutput JSON in an O line payload (no pipes)."
         )
     return (
-        "You are a structured assistant. Return strict JSON only. "
+        "You are a structured assistant. Return TMP-S v2.2 lines only. "
         "No Markdown and no extra text."
     )
 
@@ -40,7 +42,7 @@ def build_prompt(
         "stage_type": stage,
         "orchestra_briefing": orchestra_briefing,
         "input_payload": input_payload,
-        "response_format": "strict_json_only",
+        "response_format": "tmp_s_v2_2",
     }
     if token_budget is not None:
         user_payload["token_budget"] = token_budget

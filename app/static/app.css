@@ -150,6 +150,151 @@ textarea {
   justify-content: space-between;
 }
 
+.tmp-s-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-top: 16px;
+  background: #fbfbfd;
+}
+
+.tmp-s-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tmp-s-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin-top: 12px;
+}
+
+.tmp-s-section {
+  margin-top: 12px;
+}
+
+.tmp-s-kv {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.tmp-s-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.tmp-s-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #e6e9ef;
+  color: var(--text);
+}
+
+.verdict-P {
+  background: #d4edda;
+  color: #1f7a3e;
+}
+
+.verdict-W {
+  background: #fff3cd;
+  color: #8a6d1f;
+}
+
+.verdict-F,
+.verdict-H {
+  background: #f8d7da;
+  color: #a94442;
+}
+
+.decision-A {
+  background: #d4edda;
+  color: #1f7a3e;
+}
+
+.decision-R {
+  background: #fff3cd;
+  color: #8a6d1f;
+}
+
+.decision-X {
+  background: #e2e3f3;
+  color: #4245a5;
+}
+
+.decision-E {
+  background: #f8d7da;
+  color: #a94442;
+}
+
+.severity-C {
+  background: #4b1d1d;
+  color: #fff;
+}
+
+.severity-H {
+  background: #b02a37;
+  color: #fff;
+}
+
+.severity-M {
+  background: #f0ad4e;
+  color: #1a1a1a;
+}
+
+.severity-L {
+  background: #e6e9ef;
+  color: var(--text);
+}
+
+.link-button {
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.scope-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 6px;
+}
+
+.scope-item {
+  padding: 6px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.scope-item.highlight {
+  border-color: var(--accent);
+  color: var(--text);
+  background: #e9f0ff;
+}
+
 .code {
   background: #101820;
   color: #e7e7e7;

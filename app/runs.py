@@ -20,8 +20,9 @@ from app.event_store import (
 from app.paths import repo_root as paths_repo_root, runs_dir as paths_runs_dir
 from app.pipelines_registry import get_pipeline, resolve_model_snapshots
 from app.stage_runner import StageRunnerError, run_stage
-from app.validator.engine import compress_user_prompt_to_script, validate_request
+from app.validator.engine import compress_user_prompt_to_script
 from app.validator.schema import FinalValidatorLabel, OrchestraBriefing, RequestRecord
+from app.validator.runtime import validate_with_runtime
 
 
 MAX_PREVIEW_BYTES = 200 * 1024
@@ -68,8 +69,19 @@ def _write_validator_artifacts(
     stage: str,
     request_record: RequestRecord,
     label: FinalValidatorLabel,
+    validator_artifact_path: Optional[Path] = None,
+    parsed_artifact_path: Optional[Path] = None,
 ) -> None:
-    _write_json(run_path / f"validator_{stage}.json", label.dict())
+    _write_json(
+        run_path / f"validator_{stage}.json",
+        {
+            "control": label.control.dict(),
+            "control_decision": label.control.decision,
+            "control_focus": label.control.route_to,
+            "validator_artifact_path": str(validator_artifact_path) if validator_artifact_path else None,
+            "parsed_artifact_path": str(parsed_artifact_path) if parsed_artifact_path else None,
+        },
+    )
     _write_json(
         run_path / f"validator_{stage}_step_01_ingest.json",
         request_record.dict(),
@@ -142,7 +154,7 @@ def _initial_orchestra_briefing(user_prompt: str) -> OrchestraBriefing:
         next_actions=[
             "Summarize the task intent.",
             "Follow constraints.",
-            "Produce strict JSON output.",
+            "Produce TMP-S v2.2 output.",
         ],
         optional_patch=None,
         retry_prompt="No retry required.",
@@ -173,7 +185,13 @@ def _log_decision(
     )
 
 
-def _pause_run(run_id: str, label: FinalValidatorLabel) -> None:
+def _pause_run(
+    run_id: str,
+    label: FinalValidatorLabel,
+    *,
+    validator_artifact_path: Optional[Path] = None,
+    parsed_artifact_path: Optional[Path] = None,
+) -> None:
     run_path = _safe_run_dir(run_id)
     _write_json(
         run_path / "state_paused.json",
@@ -182,7 +200,11 @@ def _pause_run(run_id: str, label: FinalValidatorLabel) -> None:
             "paused_at": datetime.now(timezone.utc).isoformat(),
             "status": "PAUSED",
             "reason": "validator_decision",
-            "decision": label.control.dict(),
+            "control_decision": label.control.decision,
+            "control_focus": label.control.route_to,
+            "control": label.control.dict(),
+            "validator_artifact_path": str(validator_artifact_path) if validator_artifact_path else None,
+            "parsed_artifact_path": str(parsed_artifact_path) if parsed_artifact_path else None,
         },
     )
 
@@ -197,8 +219,20 @@ def _validator_label_path(run_path: Path, stage_id: str) -> Path:
     return run_path / f"validator_{_validator_stage_suffix(stage_id)}.json"
 
 
+def _validator_tmp_s_path(run_path: Path, stage_id: str) -> Path:
+    return run_path / f"validator_{_validator_stage_suffix(stage_id)}.tmp_s.txt"
+
+
+def _validator_parsed_path(run_path: Path, stage_id: str) -> Path:
+    return run_path / f"validator_{_validator_stage_suffix(stage_id)}.parsed.json"
+
+
 def _validator_ingest_path(run_path: Path, stage_id: str) -> Path:
     return run_path / f"validator_{_validator_stage_suffix(stage_id)}_step_01_ingest.json"
+
+
+def _validator_brief_path(run_path: Path, stage_id: str) -> Path:
+    return run_path / f"validator_{_validator_stage_suffix(stage_id)}_step_03_compress.json"
 
 
 def _stage_output_filename(stage_id: str) -> str:
@@ -278,11 +312,21 @@ def get_stage_output(run_id: str, stage_index: int) -> Dict[str, Any]:
         label = _read_json(_validator_label_path(run_path, stage_id))
         if label is None:
             raise ValueError("Validator output not found")
+        parsed_path = label.get("parsed_artifact_path")
+        raw_tmp_s = _read_json(Path(parsed_path)) if parsed_path else None
+        tmp_s_path = label.get("validator_artifact_path")
+        tmp_s_content = None
+        if tmp_s_path:
+            tmp_s_file = Path(tmp_s_path)
+            if tmp_s_file.exists():
+                tmp_s_content = tmp_s_file.read_text(encoding="utf-8")
         return {
             "run_id": run_id,
             "stage_index": stage_index,
             "stage": stage_id,
             "output": label,
+            "raw_tmp_s": tmp_s_content,
+            "parsed_tmp_s": raw_tmp_s,
         }
     output = _read_json(run_path / _stage_output_filename(stage_id))
     if output is None:
@@ -413,12 +457,21 @@ def create_stub_run(payload: Dict[str, Any]) -> str:
             "pipeline_id": "string",
         },
     )
-    pre_label = validate_request(pre_request)
+    pre_label = validate_with_runtime(
+        pre_request,
+        model={},
+        attempts_dir=run_path / "validator_attempts" / "validator_pre_planner",
+        tmp_s_path=run_path / "validator_pre_planner.tmp_s.txt",
+        parsed_path=run_path / "validator_pre_planner.parsed.json",
+        stage_id="validator_pre_planner",
+    )
     _write_validator_artifacts(
         run_path,
         stage="pre_planner",
         request_record=pre_request,
         label=pre_label,
+        validator_artifact_path=run_path / "validator_pre_planner.tmp_s.txt",
+        parsed_artifact_path=run_path / "validator_pre_planner.parsed.json",
     )
     _log_decision(run_id, "validator_pre_planner", pre_label)
     _write_json(run_path / "validator_step_01_ingest.json", pre_request.dict())
@@ -471,12 +524,21 @@ def create_stub_run(payload: Dict[str, Any]) -> str:
             "success_signals": "array",
         },
     )
-    planner_label = validate_request(planner_request)
+    planner_label = validate_with_runtime(
+        planner_request,
+        model={},
+        attempts_dir=run_path / "validator_attempts" / "validator_post_planner",
+        tmp_s_path=run_path / "validator_post_planner.tmp_s.txt",
+        parsed_path=run_path / "validator_post_planner.parsed.json",
+        stage_id="validator_post_planner",
+    )
     _write_validator_artifacts(
         run_path,
         stage="post_planner",
         request_record=planner_request,
         label=planner_label,
+        validator_artifact_path=run_path / "validator_post_planner.tmp_s.txt",
+        parsed_artifact_path=run_path / "validator_post_planner.parsed.json",
     )
     _log_decision(run_id, "validator_post_planner", planner_label)
     _write_json(
@@ -585,6 +647,11 @@ def execute_run_auto(run_id: str) -> None:
 
     try:
         planner_output: Optional[Dict[str, Any]] = _read_json(run_path / "planner_output.json")
+        last_planner_step: Optional[Dict[str, Any]] = None
+        last_planner_payload: Optional[Dict[str, Any]] = None
+        retry_counts: Dict[str, int] = {"planner": 0, "coder": 0}
+        runner_max_retries = (input_payload.get("run_config") or {}).get("max_retries_per_stage", 2)
+
         for step in steps:
             if not isinstance(step, dict):
                 continue
@@ -592,86 +659,119 @@ def execute_run_auto(run_id: str) -> None:
             stage_type = step.get("step") or role or "stage"
             stage_id = str(stage_type).strip().lower()
             if role == "validator":
+                model_snapshot = step.get("model_snapshot") or step
+                attempts_dir = run_path / "validator_attempts" / stage_id
                 label_path = _validator_label_path(run_path, stage_id)
+                tmp_s_path = _validator_tmp_s_path(run_path, stage_id)
+                parsed_path = _validator_parsed_path(run_path, stage_id)
                 if label_path.exists():
-                    existing = _read_json(label_path) or {}
-                    if existing.get("orchestra_briefing"):
-                        briefing = existing["orchestra_briefing"]
+                    briefing = _read_json(_validator_brief_path(run_path, stage_id)) or briefing
                     continue
-                if stage_id == "validator_pre_planner":
-                    request_record = RequestRecord(
-                        request_id=f"{run_id}-validator-pre-planner",
-                        created_at=datetime.now(timezone.utc),
-                        prompt="Validate task intake JSON for required fields and types.",
-                        response_text=json.dumps(input_payload),
-                        required_fields=[
-                            "goal",
-                            "user_prompt",
-                            "repo_root",
-                            "constraints",
-                            "pipeline_id",
-                        ],
-                        allowed_fields=[
-                            "goal",
-                            "user_prompt",
-                            "repo_root",
-                            "constraints",
-                            "pipeline_id",
-                        ],
-                        field_types={
-                            "goal": "string",
-                            "user_prompt": "string",
-                            "repo_root": "string",
-                            "constraints": "array",
-                            "pipeline_id": "string",
-                        },
+                while True:
+                    if stage_id == "validator_pre_planner":
+                        request_record = RequestRecord(
+                            request_id=f"{run_id}-validator-pre-planner",
+                            created_at=datetime.now(timezone.utc),
+                            prompt="Validate task intake JSON for required fields and types.",
+                            response_text=json.dumps(input_payload),
+                            required_fields=[
+                                "goal",
+                                "user_prompt",
+                                "repo_root",
+                                "constraints",
+                                "pipeline_id",
+                            ],
+                            allowed_fields=[
+                                "goal",
+                                "user_prompt",
+                                "repo_root",
+                                "constraints",
+                                "pipeline_id",
+                            ],
+                            field_types={
+                                "goal": "string",
+                                "user_prompt": "string",
+                                "repo_root": "string",
+                                "constraints": "array",
+                                "pipeline_id": "string",
+                            },
+                        )
+                    elif stage_id == "validator_post_planner":
+                        if planner_output is None:
+                            raise ValueError("Planner output missing for validator_post_planner")
+                        request_record = RequestRecord(
+                            request_id=f"{run_id}-validator-post-planner",
+                            created_at=datetime.now(timezone.utc),
+                            prompt="Validate planner output JSON for required fields and types.",
+                            response_text=json.dumps(planner_output),
+                            required_fields=[
+                                "summary",
+                                "plan_steps",
+                                "files_to_touch",
+                                "risks",
+                                "needs_context",
+                                "success_signals",
+                            ],
+                            allowed_fields=[
+                                "summary",
+                                "plan_steps",
+                                "files_to_touch",
+                                "risks",
+                                "needs_context",
+                                "success_signals",
+                            ],
+                            field_types={
+                                "summary": "string",
+                                "plan_steps": "array",
+                                "files_to_touch": "array",
+                                "risks": "array",
+                                "needs_context": "array",
+                                "success_signals": "array",
+                            },
+                        )
+                    else:
+                        raise ValueError(f"Unsupported validator stage: {stage_type}")
+                    label = validate_with_runtime(
+                        request_record,
+                        model=model_snapshot,
+                        attempts_dir=attempts_dir,
+                        tmp_s_path=tmp_s_path,
+                        parsed_path=parsed_path,
+                        stage_id=stage_id,
                     )
-                elif stage_id == "validator_post_planner":
-                    if planner_output is None:
-                        raise ValueError("Planner output missing for validator_post_planner")
-                    request_record = RequestRecord(
-                        request_id=f"{run_id}-validator-post-planner",
-                        created_at=datetime.now(timezone.utc),
-                        prompt="Validate planner output JSON for required fields and types.",
-                        response_text=json.dumps(planner_output),
-                        required_fields=[
-                            "summary",
-                            "plan_steps",
-                            "files_to_touch",
-                            "risks",
-                            "needs_context",
-                            "success_signals",
-                        ],
-                        allowed_fields=[
-                            "summary",
-                            "plan_steps",
-                            "files_to_touch",
-                            "risks",
-                            "needs_context",
-                            "success_signals",
-                        ],
-                        field_types={
-                            "summary": "string",
-                            "plan_steps": "array",
-                            "files_to_touch": "array",
-                            "risks": "array",
-                            "needs_context": "array",
-                            "success_signals": "array",
-                        },
+                    _write_validator_artifacts(
+                        run_path,
+                        stage=_validator_stage_suffix(stage_id),
+                        request_record=request_record,
+                        label=label,
+                        validator_artifact_path=tmp_s_path,
+                        parsed_artifact_path=parsed_path,
                     )
-                else:
-                    raise ValueError(f"Unsupported validator stage: {stage_type}")
-                label = validate_request(request_record)
-                _write_validator_artifacts(
-                    run_path,
-                    stage=_validator_stage_suffix(stage_id),
-                    request_record=request_record,
-                    label=label,
-                )
-                _log_decision(run_id, stage_id, label)
-                briefing = label.orchestra_briefing.dict()
-                if label.control.decision != "accept":
-                    _pause_run(run_id, label)
+                    _log_decision(run_id, stage_id, label)
+                    briefing = label.orchestra_briefing.dict()
+
+                    decision = label.control.decision
+                    if decision == "accept":
+                        break
+
+                    if decision == "retry_same_node" and stage_id == "validator_post_planner":
+                        suggested_max = label.control.max_retries or 0
+                        effective_max = min(suggested_max, runner_max_retries)
+                        if retry_counts["planner"] < effective_max and last_planner_step:
+                            retry_counts["planner"] += 1
+                            planner_output = run_stage(
+                                run_id=run_id,
+                                stage_type=last_planner_step.get("step") or "planner",
+                                model_snapshot=last_planner_step,
+                                input_payload=last_planner_payload or input_payload,
+                            )
+                            continue
+                    _pause_run(
+                        run_id,
+                        label,
+                        validator_artifact_path=tmp_s_path,
+                        parsed_artifact_path=parsed_path,
+                    )
                     return
                 continue
             if role not in {"planner", "coder"}:
@@ -692,6 +792,9 @@ def execute_run_auto(run_id: str) -> None:
                     model_snapshot=step,
                     input_payload=stage_payload,
                 )
+                if role == "planner":
+                    last_planner_step = step
+                    last_planner_payload = stage_payload
             if role == "planner":
                 planner_output = output_payload
 
@@ -746,8 +849,10 @@ def _detect_status(run_path: Path) -> str:
 
 def _detect_last_stage(run_path: Path) -> str:
     ordered = [
+        ("validator_pre_planner.tmp_s.txt", "validator_pre_planner"),
         ("validator_pre_planner.json", "validator_pre_planner"),
         ("planner_output.json", "planner"),
+        ("validator_post_planner.tmp_s.txt", "validator_post_planner"),
         ("validator_post_planner.json", "validator_post_planner"),
         ("coder_output.json", "coder"),
         ("state_final.json", "done"),
@@ -787,6 +892,12 @@ def get_run_artifacts(run_id: str) -> Dict[str, Any]:
         "state_initial.json": _file_preview(run_path / "state_initial.json"),
         "state_running.json": _file_preview(run_path / "state_running.json"),
         "state_paused.json": _file_preview(run_path / "state_paused.json"),
+        "validator_pre_planner.tmp_s.txt": _file_preview(
+            run_path / "validator_pre_planner.tmp_s.txt"
+        ),
+        "validator_pre_planner.parsed.json": _file_preview(
+            run_path / "validator_pre_planner.parsed.json"
+        ),
         "validator_pre_planner.json": _file_preview(
             run_path / "validator_pre_planner.json"
         ),
@@ -809,6 +920,12 @@ def get_run_artifacts(run_id: str) -> Dict[str, Any]:
             run_path / "validator_pre_planner_step_03_compress.json"
         ),
         "planner_output.json": _file_preview(run_path / "planner_output.json"),
+        "validator_post_planner.tmp_s.txt": _file_preview(
+            run_path / "validator_post_planner.tmp_s.txt"
+        ),
+        "validator_post_planner.parsed.json": _file_preview(
+            run_path / "validator_post_planner.parsed.json"
+        ),
         "validator_post_planner.json": _file_preview(
             run_path / "validator_post_planner.json"
         ),
@@ -862,6 +979,8 @@ def get_artifact_path(run_id: str, name: str) -> Path:
         "state_initial.json",
         "state_running.json",
         "state_paused.json",
+        "validator_pre_planner.tmp_s.txt",
+        "validator_pre_planner.parsed.json",
         "validator_pre_planner.json",
         "validator_step_01_ingest.json",
         "validator_step_02_policy.json",
@@ -870,6 +989,8 @@ def get_artifact_path(run_id: str, name: str) -> Path:
         "validator_pre_planner_step_02_policy.json",
         "validator_pre_planner_step_03_compress.json",
         "planner_output.json",
+        "validator_post_planner.tmp_s.txt",
+        "validator_post_planner.parsed.json",
         "validator_post_planner.json",
         "validator_post_planner_step_01_ingest.json",
         "validator_post_planner_step_02_policy.json",
