@@ -24,7 +24,7 @@ def test_validate_request_retries_on_invalid_json():
     assert label.hard_checks.json_parseable is False
     assert label.control.decision == "retry_same_node"
     assert label.error_localization[0].issue == "json_parse_error"
-    assert "Return strict JSON" in label.orchestra_briefing.retry_prompt
+    assert "Return TMP-S v2.2" in label.orchestra_briefing.retry_prompt
 
 
 def test_compress_user_prompt_to_script_is_deterministic():

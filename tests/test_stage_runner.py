@@ -22,7 +22,19 @@ def test_run_stage_writes_events_and_artifacts(tmp_path, monkeypatch):
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
 
     def fake_chat_completions(*, base_url, payload, timeout_s=30):
-        content = json.dumps({"summary": "ok", "plan_steps": [], "files_to_touch": []})
+        payload_json = json.dumps({"summary": "ok", "plan_steps": [], "files_to_touch": []})
+        content = "\n".join(
+            [
+                "V|2.2|run-1|planner|1",
+                "A|1111|1111|accept|ok",
+                "B|p1:planner|note",
+                "B|p2:planner|note",
+                "B|p3:planner|note",
+                "C|accept|0|0|*",
+                "S|planner|planner|planner|1",
+                f"O|PLAN|*|{payload_json}",
+            ]
+        )
         return {"choices": [{"message": {"content": content}}]}
 
     monkeypatch.setattr("app.stage_runner.chat_completions", fake_chat_completions)
@@ -104,7 +116,7 @@ def test_execute_run_auto_runs_planner_and_coder(tmp_path, monkeypatch):
 
     def fake_chat_completions(*, base_url, payload, timeout_s=30):
         if call_index["count"] == 0:
-            content = json.dumps(
+            payload_json = json.dumps(
                 {
                     "summary": "ok",
                     "plan_steps": [],
@@ -114,8 +126,20 @@ def test_execute_run_auto_runs_planner_and_coder(tmp_path, monkeypatch):
                     "success_signals": [],
                 }
             )
+            content = "\n".join(
+                [
+                    "V|2.2|run-1|planner|1",
+                    "A|1111|1111|accept|ok",
+                    "B|p1:planner|note",
+                    "B|p2:planner|note",
+                    "B|p3:planner|note",
+                    "C|accept|0|0|*",
+                    "S|planner|planner|planner|1",
+                    f"O|PLAN|*|{payload_json}",
+                ]
+            )
         else:
-            content = json.dumps(
+            payload_json = json.dumps(
                 {
                     "patch_unified_diff": "",
                     "touched_files": [],
@@ -123,6 +147,18 @@ def test_execute_run_auto_runs_planner_and_coder(tmp_path, monkeypatch):
                     "verification": [],
                     "followups": [],
                 }
+            )
+            content = "\n".join(
+                [
+                    "V|2.2|run-1|coder|1",
+                    "A|1111|1111|accept|ok",
+                    "B|p1:coder|note",
+                    "B|p2:coder|note",
+                    "B|p3:coder|note",
+                    "C|accept|0|0|*",
+                    "S|coder|coder|coder|1",
+                    f"O|DIFF|*|{payload_json}",
+                ]
             )
         call_index["count"] += 1
         return {"choices": [{"message": {"content": content}}]}

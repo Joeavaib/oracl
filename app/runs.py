@@ -154,7 +154,7 @@ def _initial_orchestra_briefing(user_prompt: str) -> OrchestraBriefing:
         next_actions=[
             "Summarize the task intent.",
             "Follow constraints.",
-            "Produce strict JSON output.",
+            "Produce TMP-S v2.2 output.",
         ],
         optional_patch=None,
         retry_prompt="No retry required.",

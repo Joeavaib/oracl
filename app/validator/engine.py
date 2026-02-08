@@ -218,7 +218,7 @@ def validate_request(record: RequestRecord) -> FinalValidatorLabel:
             else ""
         )
         retry_prompt = (
-            "Return strict JSON object that matches the required schema." + required_hint
+            "Return TMP-S v2.2 output that matches the required schema." + required_hint
         )
         minimal_rationale = (
             "Hard checks failed; output must be corrected before semantic review."
@@ -226,7 +226,7 @@ def validate_request(record: RequestRecord) -> FinalValidatorLabel:
         known_correct = []
         uncertain = ["Schema compliance failed."]
         next_actions = [
-            "Return valid JSON.",
+            "Return valid TMP-S output.",
             "Include all required fields.",
             "Remove extraneous fields and fix types.",
         ]
