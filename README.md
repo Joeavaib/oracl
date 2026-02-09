@@ -14,6 +14,12 @@ Optional (für HTML-Form-Uploads in `/ui`):
 pip install python-multipart
 ```
 
+Tier-1 TF-IDF Auswahl (für automatische Scope-Selektion):
+
+```bash
+pip install scikit-learn scipy joblib
+```
+
 ## Backend Setup (llama.cpp)
 
 Startet zwei `llama-server` Instanzen (Validator auf 8001, Specialist auf 8002). Die UI erwartet Base-URLs **ohne** `/v1`.
