@@ -21,6 +21,8 @@ from app.paths import repo_root as paths_repo_root, runs_dir as paths_runs_dir
 from app.pipelines_registry import get_pipeline, resolve_model_snapshots
 from app.runtime_manager import ensure_runtime
 from app.stage_runner import StageRunnerError, run_stage
+from app.tier1.config import default_tier1_config
+from app.tier1.query import select_files as tier1_select_files
 from app.validator.engine import compress_user_prompt_to_script
 from app.validator.schema import FinalValidatorLabel, OrchestraBriefing, RequestRecord
 from app.validator.runtime import validate_with_runtime
@@ -629,6 +631,33 @@ def execute_run_auto(run_id: str) -> None:
     briefing = _read_json(run_path / "validator_step_03_compress.json")
     if not briefing:
         briefing = _initial_orchestra_briefing(input_payload.get("user_prompt") or "").dict()
+    cfg = default_tier1_config()
+    tier1_result = tier1_select_files(
+        Path(input_payload["repo_root"]),
+        input_payload["user_prompt"],
+        cfg,
+    )
+    tier1_payload = {
+        "repo_fingerprint": tier1_result.repo_fingerprint,
+        "query": tier1_result.query,
+        "top_k_stage1": tier1_result.top_k_stage1,
+        "top_k_final": tier1_result.top_k_final,
+        "items": [
+            {
+                "id": item.id,
+                "rel_path": item.rel_path,
+                "abs_path": item.abs_path,
+                "score": item.score,
+                "rank": item.rank,
+            }
+            for item in tier1_result.items
+        ],
+    }
+    _write_json(run_path / "tier1_selection.json", tier1_payload)
+    briefing = dict(briefing)
+    if not briefing.get("current_scope"):
+        briefing["current_scope"] = [item["rel_path"] for item in tier1_payload["items"]]
+    _write_json(run_path / "validator_step_03_compress.json", briefing)
     pipeline_snapshot = _read_json(run_path / "pipeline_snapshot.json") or {}
     model_snapshots = _read_json(run_path / "model_snapshots.json") or {}
 
