@@ -5,7 +5,31 @@
 {% block content %}
 <section class="card">
   <h2>Models</h2>
+  {% if error %}
+    <p class="warning">{{ error }}</p>
+  {% endif %}
   <p><a class="button" href="/ui/models/new">Neues Model</a></p>
+  <div class="tabs">
+    <div class="tab-buttons" role="tablist">
+      <button type="button" class="tab-button is-active" data-provider="all">
+        Alle Provider
+      </button>
+      <button type="button" class="tab-button" data-provider="ollama">Ollama</button>
+      <button type="button" class="tab-button" data-provider="llamacpp">llama.cpp</button>
+      <button type="button" class="tab-button" data-provider="openai">OpenAI-compat</button>
+    </div>
+    <div class="actions">
+      <label>
+        Role Filter
+        <select id="models-role-filter">
+          <option value="">Alle</option>
+          <option value="validator">validator</option>
+          <option value="planner">planner</option>
+          <option value="coder">coder</option>
+        </select>
+      </label>
+    </div>
+  </div>
   {% if models %}
     <table class="runs-table">
       <thead>
@@ -14,15 +38,25 @@
           <th>Role</th>
           <th>Provider</th>
           <th>Model Name</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
         {% for model in models %}
-        <tr>
+        <tr data-role="{{ model.role }}" data-provider="{{ model.provider }}">
           <td><a href="/ui/models/{{ model.id }}">{{ model.id }}</a></td>
           <td>{{ model.role }}</td>
           <td>{{ model.provider }}</td>
           <td>{{ model.model_name }}</td>
+          <td>
+            <form
+              method="post"
+              action="/ui/models/{{ model.id }}/delete"
+              onsubmit="return confirm('Wirklich löschen? Wird in Pipelines geprüft.');"
+            >
+              <button type="submit" class="button">Delete</button>
+            </form>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -31,4 +65,5 @@
     <p class="hint">Noch keine Modelle vorhanden.</p>
   {% endif %}
 </section>
+<script src="/static/models_overview.js" defer></script>
 {% endblock %}

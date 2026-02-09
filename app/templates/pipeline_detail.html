@@ -40,15 +40,29 @@
         </thead>
         <tbody>
           {% for step in steps %}
-          <tr>
+          <tr data-step-row>
             <td>
               <input type="text" name="step_{{ loop.index0 }}" value="{{ step.step or '' }}" />
             </td>
             <td>
-              <input type="text" name="role_{{ loop.index0 }}" value="{{ step.role or '' }}" />
+              <input
+                type="text"
+                name="role_{{ loop.index0 }}"
+                value="{{ step.role or '' }}"
+                class="role-input"
+              />
             </td>
             <td>
-              <input type="text" name="model_id_{{ loop.index0 }}" value="{{ step.model_id or '' }}" />
+              <input
+                type="text"
+                name="model_id_{{ loop.index0 }}"
+                class="model-id-input"
+                list="models-list-{{ loop.index0 }}"
+                data-current-model-id="{{ step.model_id or '' }}"
+                value="{{ step.model_id or '' }}"
+              />
+              <datalist id="models-list-{{ loop.index0 }}"></datalist>
+              <span class="warning missing-model-label" hidden></span>
             </td>
           </tr>
           {% endfor %}
@@ -63,4 +77,6 @@
     </div>
   </form>
 </section>
+<script type="application/json" id="models-index">{{ models_index | tojson }}</script>
+<script src="/static/pipeline_detail.js" defer></script>
 {% endblock %}

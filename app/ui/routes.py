@@ -25,6 +25,7 @@ from app.models_registry import (
 )
 from app.pipelines_registry import (
     create_pipeline,
+    find_pipelines_using_model,
     get_pipeline as get_registry_pipeline,
     list_pipelines as list_registry_pipelines,
     update_pipeline,
@@ -100,11 +101,25 @@ def _pipeline_steps_from_form(form: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _pipeline_form_context(pipeline: Dict[str, Any], is_new: bool, error: Optional[str] = None) -> Dict[str, Any]:
     steps = list(pipeline.get("steps", []))
     steps.append({"step": "", "role": "", "model_id": ""})
+    models = list_models()
+    models_index = {
+        "all": [
+            {"id": model.get("id"), "role": model.get("role")}
+            for model in models
+            if model.get("id")
+        ],
+        "by_role": {role: [] for role in MODEL_ROLES},
+    }
+    for model in models_index["all"]:
+        role = model.get("role")
+        if role in models_index["by_role"]:
+            models_index["by_role"][role].append(model)
     return {
         "pipeline": pipeline,
         "steps": steps,
         "is_new": is_new,
         "error": error,
+        "models_index": models_index,
     }
 
 
@@ -384,7 +399,7 @@ async def models_list(request: Request) -> HTMLResponse:
     models = list_models()
     return templates.TemplateResponse(
         "models.html",
-        {"request": request, "models": models},
+        {"request": request, "models": models, "error": None},
     )
 
 
@@ -811,8 +826,54 @@ async def api_create_model(request: Request) -> Dict[str, Any]:
 
 
 @router.get("/api/models")
-async def api_list_models() -> Dict[str, Any]:
-    return {"models": list_models()}
+async def api_list_models(role: Optional[str] = None) -> Dict[str, Any]:
+    if role is not None and role not in MODEL_ROLES:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    models = list_models()
+    if role is not None:
+        models = [model for model in models if model.get("role") == role]
+    response = [
+        {
+            "id": model.get("id"),
+            "role": model.get("role"),
+            "provider": model.get("provider"),
+            "base_url": model.get("base_url"),
+            "model_name": model.get("model_name"),
+        }
+        for model in models
+    ]
+    return {"models": response}
+
+
+@router.get("/api/models/index")
+async def api_models_index() -> Dict[str, Any]:
+    models = list_models()
+    by_role: Dict[str, List[Dict[str, Any]]] = {role: [] for role in MODEL_ROLES}
+    for model in models:
+        role = model.get("role")
+        if role in by_role:
+            by_role[role].append(
+                {
+                    "id": model.get("id"),
+                    "role": model.get("role"),
+                    "provider": model.get("provider"),
+                    "base_url": model.get("base_url"),
+                    "model_name": model.get("model_name"),
+                }
+            )
+    return {
+        "all": [
+            {
+                "id": model.get("id"),
+                "role": model.get("role"),
+                "provider": model.get("provider"),
+                "base_url": model.get("base_url"),
+                "model_name": model.get("model_name"),
+            }
+            for model in models
+        ],
+        "by_role": by_role,
+    }
 
 
 @router.get("/api/models/{model_id}")
@@ -858,11 +919,38 @@ async def api_update_model(model_id: str, request: Request) -> Dict[str, Any]:
 
 @router.delete("/api/models/{model_id}")
 async def api_delete_model(model_id: str) -> Dict[str, Any]:
+    pipelines = find_pipelines_using_model(model_id)
+    if pipelines:
+        detail = f"Model is used by pipelines: {', '.join(pipelines)}"
+        raise HTTPException(status_code=400, detail=detail)
     try:
         delete_model(model_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"deleted": model_id}
+    return {"ok": True}
+
+
+@router.post("/ui/models/{model_id}/delete")
+async def ui_delete_model(request: Request, model_id: str) -> HTMLResponse:
+    pipelines = find_pipelines_using_model(model_id)
+    if pipelines:
+        models = list_models()
+        detail = f"Model wird in Pipelines verwendet: {', '.join(pipelines)}"
+        return templates.TemplateResponse(
+            "models.html",
+            {"request": request, "models": models, "error": detail},
+            status_code=400,
+        )
+    try:
+        delete_model(model_id)
+    except ValueError as exc:
+        models = list_models()
+        return templates.TemplateResponse(
+            "models.html",
+            {"request": request, "models": models, "error": str(exc)},
+            status_code=404,
+        )
+    return RedirectResponse(url="/ui/models", status_code=303)
 
 
 @router.put("/api/pipelines/{pipeline_id}")

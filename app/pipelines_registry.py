@@ -44,7 +44,7 @@ def _read_json(path: Path) -> Optional[Dict[str, Any]]:
         return json.load(handle)
 
 
-def _validate_pipeline_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _validate_pipeline_payload(payload: Dict[str, Any], *, verify_models: bool = True) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Pipeline payload must be a JSON object")
     pipeline_id = payload.get("id")
@@ -73,6 +73,16 @@ def _validate_pipeline_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         model_id = step.get("model_id")
         if not isinstance(model_id, str) or not model_id.strip():
             raise ValueError("step model_id is required")
+        if verify_models:
+            try:
+                model_snapshot = get_model(model_id)
+            except ValueError as exc:
+                raise ValueError(f"model_id not found: {model_id}") from exc
+            model_role = model_snapshot.get("role")
+            if model_role and role != model_role:
+                raise ValueError(
+                    f"model role mismatch for model_id {model_id}: expected {role}, got {model_role}"
+                )
     return payload
 
 
@@ -85,12 +95,12 @@ def list_pipelines() -> List[Dict[str, Any]]:
         payload = _read_json(path)
         if payload is None:
             continue
-        pipelines.append(_validate_pipeline_payload(payload))
+        pipelines.append(_validate_pipeline_payload(payload, verify_models=False))
     return pipelines
 
 
 def create_pipeline(payload: Dict[str, Any]) -> Dict[str, Any]:
-    pipeline = _validate_pipeline_payload(payload)
+    pipeline = _validate_pipeline_payload(payload, verify_models=True)
     path = _safe_pipeline_path(pipeline["id"])
     if path.exists():
         raise ValueError("Pipeline already exists")
@@ -101,7 +111,7 @@ def create_pipeline(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def update_pipeline(pipeline_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    pipeline = _validate_pipeline_payload(payload)
+    pipeline = _validate_pipeline_payload(payload, verify_models=True)
     if pipeline["id"] != pipeline_id:
         raise ValueError("Pipeline id mismatch")
     path = _safe_pipeline_path(pipeline_id)
@@ -117,7 +127,7 @@ def get_pipeline(pipeline_id: str) -> Dict[str, Any]:
     payload = _read_json(path)
     if payload is None:
         raise ValueError("Pipeline not found")
-    return _validate_pipeline_payload(payload)
+    return _validate_pipeline_payload(payload, verify_models=False)
 
 
 def resolve_model_snapshots(pipeline: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -142,3 +152,23 @@ def resolve_model_snapshots(pipeline: Dict[str, Any]) -> List[Dict[str, Any]]:
             }
         )
     return snapshots
+
+
+def find_pipelines_using_model(model_id: str) -> List[str]:
+    root = pipelines_dir()
+    if not root.exists():
+        return []
+    matches: List[str] = []
+    for path in sorted(root.glob("*.json")):
+        payload = _read_json(path)
+        if not isinstance(payload, dict):
+            continue
+        pipeline_id = payload.get("id") or path.stem
+        steps = payload.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if isinstance(step, dict) and step.get("model_id") == model_id:
+                matches.append(pipeline_id)
+                break
+    return matches

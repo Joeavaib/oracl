@@ -355,6 +355,10 @@ textarea {
   font-weight: 600;
 }
 
+.runs-table tr.model-missing td {
+  background: #fff4f4;
+}
+
 .spinner {
   position: fixed;
   top: 16px;
