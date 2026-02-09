@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.models_registry import get_model
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -95,6 +96,8 @@ def validate_pipeline(payload: Dict[str, Any]) -> Dict[str, Any]:
                 errors.append(_error(f"{prefix}.role", "Must be a string"))
             if "model_id" in step and not isinstance(model_id, str):
                 errors.append(_error(f"{prefix}.model_id", "Must be a string"))
+            if isinstance(model_id, str) and not model_id.strip():
+                errors.append(_error(f"{prefix}.model_id", "Must not be empty"))
             if "params" in step and not isinstance(params, dict):
                 errors.append(_error(f"{prefix}.params", "Must be an object"))
             if "type" in step:
@@ -109,6 +112,21 @@ def validate_pipeline(payload: Dict[str, Any]) -> Dict[str, Any]:
                             _error(
                                 f"{prefix}.type",
                                 f"Role must be {expected_role} for step type {step_type}",
+                            )
+                        )
+
+            if isinstance(model_id, str) and model_id.strip():
+                try:
+                    model_snapshot = get_model(model_id)
+                except ValueError:
+                    errors.append(_error(f"{prefix}.model_id", "Model ID does not exist"))
+                else:
+                    model_role = model_snapshot.get("role")
+                    if isinstance(role, str) and model_role and role != model_role:
+                        errors.append(
+                            _error(
+                                f"{prefix}.model_id",
+                                f"Model role mismatch: expected {role}, got {model_role}",
                             )
                         )
 

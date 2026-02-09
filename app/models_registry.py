@@ -206,8 +206,9 @@ def list_models() -> List[Dict[str, Any]]:
     models: List[Dict[str, Any]] = []
     for path in sorted(root.glob("*.json")):
         payload = _read_json(path)
-        if payload is None:
+        if not isinstance(payload, dict):
             continue
+        payload["id"] = path.stem
         models.append(payload)
     return models
 
@@ -215,8 +216,9 @@ def list_models() -> List[Dict[str, Any]]:
 def get_model(model_id: str) -> Dict[str, Any]:
     path = _safe_model_path(model_id)
     payload = _read_json(path)
-    if payload is None:
+    if not isinstance(payload, dict):
         raise ValueError("Model not found")
+    payload["id"] = model_id
     return payload
 
 
