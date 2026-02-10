@@ -6,8 +6,18 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-MODEL_ROLES = {"validator", "planner", "coder"}
-MODEL_PROVIDERS = {"openai-compatible", "vllm", "ollama"}
+MODEL_ROLES = {"validator", "planner", "coder", "preprocessor"}
+MODEL_PROVIDERS = {"openai-compatible", "vllm", "ollama", "llamacpp"}
+
+_PROVIDERS_WITH_OPTIONAL_ENDPOINTS = {"llamacpp", "ollama"}
+_ALLOWED_PARAM_FIELDS = {
+    "ctx_size",
+    "threads",
+    "n_gpu_layers",
+    "offload_kqv",
+    "token_budget",
+    "extra_args",
+}
 
 
 def repo_root() -> Path:
@@ -50,12 +60,52 @@ def _validate_required_string(payload: Dict[str, Any], key: str) -> str:
     return value
 
 
+def _validate_optional_string(payload: Dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be a string")
+    return value.strip()
+
+
+def _validate_params(payload: Dict[str, Any]) -> Dict[str, Any]:
+    params = payload.get("params")
+    if params is None:
+        return {}
+    if not isinstance(params, dict):
+        raise ValueError("params must be an object")
+
+    unknown = set(params.keys()) - _ALLOWED_PARAM_FIELDS
+    if unknown:
+        raise ValueError(f"params contain unsupported keys: {sorted(unknown)}")
+
+    validated: Dict[str, Any] = {}
+    for key in ["ctx_size", "threads", "n_gpu_layers", "token_budget"]:
+        if key in params:
+            value = params[key]
+            if not isinstance(value, int):
+                raise ValueError(f"params.{key} must be an integer")
+            validated[key] = value
+    if "offload_kqv" in params:
+        value = params["offload_kqv"]
+        if not isinstance(value, bool):
+            raise ValueError("params.offload_kqv must be a boolean")
+        validated["offload_kqv"] = value
+    if "extra_args" in params:
+        value = params["extra_args"]
+        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            raise ValueError("params.extra_args must be a list of strings")
+        validated["extra_args"] = value
+    return validated
+
+
 def _validate_model_payload(payload: Dict[str, Any], require_all: bool = True) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Model payload must be a JSON object")
 
     data: Dict[str, Any] = {}
-    required_fields = ["id", "role", "provider", "model_name", "base_url", "prompt_profile"]
+    required_fields = ["id", "role", "provider", "prompt_profile"]
     for field in required_fields:
         if require_all or field in payload:
             data[field] = _validate_required_string(payload, field)
@@ -68,8 +118,20 @@ def _validate_model_payload(payload: Dict[str, Any], require_all: bool = True) -
     if "provider" in data and data["provider"] not in MODEL_PROVIDERS:
         raise ValueError(f"provider must be one of {sorted(MODEL_PROVIDERS)}")
 
+    provider = data.get("provider")
+    if provider in _PROVIDERS_WITH_OPTIONAL_ENDPOINTS:
+        data["model_name"] = _validate_optional_string(payload, "model_name")
+        data["base_url"] = _validate_optional_string(payload, "base_url")
+    else:
+        if require_all or "model_name" in payload:
+            data["model_name"] = _validate_required_string(payload, "model_name")
+        if require_all or "base_url" in payload:
+            data["base_url"] = _validate_required_string(payload, "base_url")
+
     if "adapter" in payload:
         data["adapter"] = payload.get("adapter")
+    if "params" in payload:
+        data["params"] = _validate_params(payload)
     return data
 
 
