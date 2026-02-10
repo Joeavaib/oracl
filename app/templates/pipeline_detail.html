@@ -53,15 +53,14 @@
               />
             </td>
             <td>
-              <input
-                type="text"
+              <select
                 name="model_id_{{ loop.index0 }}"
-                class="model-id-input"
-                list="models-list-{{ loop.index0 }}"
+                class="model-id-select"
                 data-current-model-id="{{ step.model_id or '' }}"
-                value="{{ step.model_id or '' }}"
-              />
-              <datalist id="models-list-{{ loop.index0 }}"></datalist>
+                data-missing-suggestions="{{ (step.model_id_suggestions or []) | join(',') }}"
+              >
+                <option value=""></option>
+              </select>
               <span class="warning missing-model-label" hidden></span>
             </td>
           </tr>

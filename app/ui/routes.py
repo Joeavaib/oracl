@@ -99,12 +99,16 @@ def _pipeline_steps_from_form(form: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _pipeline_form_context(pipeline: Dict[str, Any], is_new: bool, error: Optional[str] = None) -> Dict[str, Any]:
-    steps = list(pipeline.get("steps", []))
-    steps.append({"step": "", "role": "", "model_id": ""})
+    steps = [dict(step) for step in pipeline.get("steps", [])]
     models = list_models()
     models_index = {
         "all": [
-            {"id": model.get("id"), "role": model.get("role")}
+            {
+                "id": model.get("id"),
+                "role": model.get("role"),
+                "provider": model.get("provider"),
+                "model_name": model.get("model_name"),
+            }
             for model in models
             if model.get("id")
         ],
@@ -114,6 +118,29 @@ def _pipeline_form_context(pipeline: Dict[str, Any], is_new: bool, error: Option
         role = model.get("role")
         if role in models_index["by_role"]:
             models_index["by_role"][role].append(model)
+
+    model_ids = {str(model.get("id")) for model in models_index["all"] if model.get("id")}
+    models_by_name: Dict[str, List[Dict[str, Any]]] = {}
+    for model in models_index["all"]:
+        model_name = str(model.get("model_name") or "").strip()
+        if not model_name:
+            continue
+        models_by_name.setdefault(model_name, []).append(model)
+
+    for step in steps:
+        stored_model_id = str(step.get("model_id") or "").strip()
+        if not stored_model_id or stored_model_id in model_ids:
+            continue
+        matches = models_by_name.get(stored_model_id, [])
+        if len(matches) == 1:
+            step["model_id"] = matches[0].get("id")
+            step["model_id_resolved_from"] = stored_model_id
+        elif len(matches) > 1:
+            step["model_id_suggestions"] = [
+                str(match.get("id")) for match in matches if match.get("id")
+            ]
+
+    steps.append({"step": "", "role": "", "model_id": ""})
     return {
         "pipeline": pipeline,
         "steps": steps,
@@ -826,13 +853,13 @@ async def api_create_model(request: Request) -> Dict[str, Any]:
 
 
 @router.get("/api/models")
-async def api_list_models(role: Optional[str] = None) -> Dict[str, Any]:
+async def api_list_models(role: Optional[str] = None) -> List[Dict[str, Any]]:
     if role is not None and role not in MODEL_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
     models = list_models()
     if role is not None:
         models = [model for model in models if model.get("role") == role]
-    response = [
+    return [
         {
             "id": model.get("id"),
             "role": model.get("role"),
@@ -842,7 +869,6 @@ async def api_list_models(role: Optional[str] = None) -> Dict[str, Any]:
         }
         for model in models
     ]
-    return {"models": response}
 
 
 @router.get("/api/models/index")
@@ -861,19 +887,7 @@ async def api_models_index() -> Dict[str, Any]:
                     "model_name": model.get("model_name"),
                 }
             )
-    return {
-        "all": [
-            {
-                "id": model.get("id"),
-                "role": model.get("role"),
-                "provider": model.get("provider"),
-                "base_url": model.get("base_url"),
-                "model_name": model.get("model_name"),
-            }
-            for model in models
-        ],
-        "by_role": by_role,
-    }
+    return {"by_role": by_role}
 
 
 @router.get("/api/models/{model_id}")
