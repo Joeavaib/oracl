@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from app.pipelines_registry import get_pipeline, resolve_model_snapshots
+from app.tier2 import Tier1Candidate, run_tier2
 
 
 MAX_PREVIEW_BYTES = 200 * 1024
@@ -40,6 +41,80 @@ def _write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+
+def append_event(run_path: Path, stage_id: str, message: str) -> None:
+    payload = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "stage": stage_id,
+        "message": message,
+    }
+    with (run_path / "events.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def _merge_tier2(
+    briefing: Dict[str, Any],
+    tier2_selection: Dict[str, Any],
+    tier2_context: Dict[str, Any],
+) -> Dict[str, Any]:
+    merged = dict(briefing)
+    merged["current_scope"] = list(tier2_selection.get("selected_paths", []))
+    merged["tier2"] = {
+        "selected_paths": list(tier2_selection.get("selected_paths", [])),
+        "context": tier2_context,
+    }
+    return merged
+
+
+def _normalize_tier1_items(raw: Any) -> List[Tier1Candidate]:
+    if isinstance(raw, dict):
+        raw = raw.get("top_k_final") or raw.get("items") or raw.get("candidates") or []
+    items: List[Tier1Candidate] = []
+    for index, item in enumerate(raw or []):
+        if not isinstance(item, dict):
+            continue
+        rel_path = str(item.get("rel_path") or item.get("path") or "").strip()
+        if not rel_path:
+            continue
+        items.append(
+            Tier1Candidate(
+                rel_path=rel_path,
+                score=float(item.get("score", 0.0) or 0.0),
+                rank=int(item.get("rank", index + 1) or index + 1),
+                preview=str(item.get("preview", "") or ""),
+            )
+        )
+    return items
+
+
+def execute_run_auto(run_path: Path, payload: Dict[str, Any]) -> Dict[str, Any]:
+    query = str(payload.get("user_prompt") or payload.get("goal") or "")
+    tier1_items = _normalize_tier1_items(payload.get("tier1_selection"))
+    if not tier1_items and payload.get("repo_root"):
+        tier1_path = Path(str(payload["repo_root"])) / "tier1_selection.json"
+        if tier1_path.exists():
+            tier1_items = _normalize_tier1_items(_read_json(tier1_path) or {})
+
+    tier2_repo_root = Path(str(payload.get("repo_root") or repo_root()))
+    tier2_selection, tier2_context, cache_hit = run_tier2(
+        repo_root=tier2_repo_root,
+        query=query,
+        tier1_items=tier1_items,
+        cache_dir=run_path / ".cache" / "tier2",
+        event_cb=lambda event, msg: append_event(run_path, "tier2", f"{event}: {msg}"),
+    )
+    _write_json(run_path / "tier2_selection.json", tier2_selection.to_dict())
+    context_payload = tier2_context.to_dict()
+    _write_json(run_path / "tier2_context.json", context_payload)
+    (run_path / "tier2_context.txt").write_text(
+        context_payload.get("overall_summary", ""), encoding="utf-8"
+    )
+    return {
+        "tier2_selection": tier2_selection.to_dict(),
+        "tier2_context": context_payload,
+        "tier2_cache_hit": cache_hit,
+    }
 
 
 def _file_preview(path: Path, max_bytes: int = MAX_PREVIEW_BYTES) -> Dict[str, Any]:
@@ -199,6 +274,10 @@ def create_stub_run(payload: Dict[str, Any]) -> str:
         for entry in events:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
+    tier2_payload = execute_run_auto(run_path, payload)
+    planner_briefing = _merge_tier2({}, tier2_payload["tier2_selection"], tier2_payload["tier2_context"])
+    _write_json(run_path / "briefing.json", planner_briefing)
+
     return run_id
 
 
@@ -269,6 +348,10 @@ def get_run_artifacts(run_id: str) -> Dict[str, Any]:
         ),
         "coder_output.json": _file_preview(run_path / "coder_output.json"),
         "state_final.json": _file_preview(run_path / "state_final.json"),
+        "tier2_selection.json": _file_preview(run_path / "tier2_selection.json"),
+        "tier2_context.json": _file_preview(run_path / "tier2_context.json"),
+        "tier2_context.txt": _file_preview(run_path / "tier2_context.txt"),
+        "briefing.json": _file_preview(run_path / "briefing.json"),
         "pipeline_snapshot.json": _file_preview(run_path / "pipeline_snapshot.json"),
         "model_snapshots.json": _file_preview(run_path / "model_snapshots.json"),
     }
@@ -305,6 +388,10 @@ def get_artifact_path(run_id: str, name: str) -> Path:
         "pipeline_snapshot.json",
         "model_snapshots.json",
         "events.jsonl",
+        "tier2_selection.json",
+        "tier2_context.json",
+        "tier2_context.txt",
+        "briefing.json",
     }
     if name not in allowed:
         raise ValueError("Artifact not allowed")
