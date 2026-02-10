@@ -11,8 +11,18 @@ const parseModelsIndex = () => {
   }
 };
 
-const buildOptions = (listElement, models) => {
-  listElement.innerHTML = "";
+const formatModelLabel = (model) => {
+  const id = model.id || "";
+  const provider = model.provider || "-";
+  const name = model.model_name || "-";
+  return `${id} — (${provider}: ${name})`;
+};
+
+const buildOptions = (selectElement, models, selectedId) => {
+  selectElement.innerHTML = "";
+  const emptyOption = document.createElement("option");
+  emptyOption.value = "";
+  selectElement.appendChild(emptyOption);
   const sorted = [...models].sort((left, right) =>
     String(left.id || "").localeCompare(String(right.id || ""))
   );
@@ -23,44 +33,59 @@ const buildOptions = (listElement, models) => {
     }
     const option = document.createElement("option");
     option.value = model.id;
-    option.label = model.id;
-    listElement.appendChild(option);
+    option.textContent = formatModelLabel(model);
+    selectElement.appendChild(option);
   });
+  if (selectedId) {
+    selectElement.value = selectedId;
+  }
 };
 
 const updateRowOptions = (row, modelsIndex) => {
   const roleInput = row.querySelector(".role-input");
-  const modelInput = row.querySelector(".model-id-input");
-  const dataList = row.querySelector("datalist");
+  const modelSelect = row.querySelector(".model-id-select");
   const missingLabel = row.querySelector(".missing-model-label");
-  if (!roleInput || !modelInput || !dataList) {
+  if (!roleInput || !modelSelect) {
     return;
   }
+  const rawSuggestions = modelSelect.dataset.missingSuggestions || "";
+  const suggestions = rawSuggestions
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
 
   const role = roleInput.value.trim();
-  const selectedId = modelInput.dataset.currentModelId || modelInput.value;
-  const modelsForRole =
-    role && modelsIndex.by_role && modelsIndex.by_role[role]
-      ? modelsIndex.by_role[role]
-      : modelsIndex.all || [];
+  const normalizedRole = role.toLowerCase();
+  const selectedId = modelSelect.dataset.currentModelId || modelSelect.value;
+  let modelsForRole = modelsIndex.all || [];
+  if (normalizedRole) {
+    const entries = Object.entries(modelsIndex.by_role || {});
+    const matchingEntry = entries.find(
+      ([roleKey]) => String(roleKey || "").toLowerCase() === normalizedRole
+    );
+    modelsForRole = matchingEntry ? matchingEntry[1] || [] : [];
+  }
 
   const modelIds = new Set(modelsForRole.map((model) => model.id));
-  buildOptions(dataList, modelsForRole);
+  buildOptions(modelSelect, modelsForRole, selectedId);
 
   let hasMissing = false;
   if (selectedId && !modelIds.has(selectedId)) {
     const missingOption = document.createElement("option");
     missingOption.value = selectedId;
-    missingOption.label = `⚠ missing: ${selectedId}`;
-    dataList.insertBefore(missingOption, dataList.firstChild);
-    modelInput.value = selectedId;
+    missingOption.textContent = `⚠ missing: ${selectedId}`;
+    modelSelect.insertBefore(missingOption, modelSelect.firstChild);
+    modelSelect.value = selectedId;
     hasMissing = true;
   }
 
   row.classList.toggle("model-missing", hasMissing);
   if (missingLabel) {
     if (hasMissing) {
-      missingLabel.textContent = `⚠ missing: ${selectedId}`;
+      const suggestionText = suggestions.length
+        ? ` (Vorschläge: ${suggestions.join(", ")})`
+        : "";
+      missingLabel.textContent = `⚠ missing: ${selectedId}${suggestionText}`;
       missingLabel.hidden = false;
     } else {
       missingLabel.textContent = "";
@@ -80,14 +105,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   rows.forEach((row) => {
     const roleInput = row.querySelector(".role-input");
-    const modelInput = row.querySelector(".model-id-input");
+    const modelSelect = row.querySelector(".model-id-select");
     if (roleInput) {
       roleInput.addEventListener("input", () => updateRowOptions(row, modelsIndex));
       roleInput.addEventListener("change", () => updateRowOptions(row, modelsIndex));
     }
-    if (modelInput) {
-      modelInput.addEventListener("input", () => {
-        modelInput.dataset.currentModelId = modelInput.value;
+    if (modelSelect) {
+      modelSelect.addEventListener("change", () => {
+        modelSelect.dataset.currentModelId = modelSelect.value;
+        if (modelSelect.value) {
+          modelSelect.dataset.missingSuggestions = "";
+        }
         updateRowOptions(row, modelsIndex);
       });
     }
