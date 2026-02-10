@@ -102,6 +102,13 @@ def get_pipeline(pipeline_id: str) -> Dict[str, Any]:
     return _validate_pipeline_payload(payload)
 
 
+def delete_pipeline(pipeline_id: str) -> None:
+    path = _safe_pipeline_path(pipeline_id)
+    if not path.exists():
+        raise ValueError("Pipeline not found")
+    path.unlink()
+
+
 def resolve_model_snapshots(pipeline: Dict[str, Any]) -> List[Dict[str, Any]]:
     steps = pipeline.get("steps", [])
     snapshots: List[Dict[str, Any]] = []

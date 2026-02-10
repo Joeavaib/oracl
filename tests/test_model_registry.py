@@ -64,3 +64,31 @@ def test_model_registry_api_validation(tmp_path, monkeypatch):
     fetched = client.get("/api/models/planner-1")
     assert fetched.status_code == 200
     assert fetched.json()["role"] == "planner"
+
+
+def test_model_registry_accepts_preprocessor_and_params(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODELS_DIR", str(tmp_path))
+
+    payload = {
+        "id": "tier2-preprocessor",
+        "role": "preprocessor",
+        "provider": "llamacpp",
+        "prompt_profile": "Compress context.",
+        "params": {
+            "ctx_size": 8192,
+            "threads": 4,
+            "n_gpu_layers": 0,
+            "offload_kqv": False,
+            "token_budget": 2048,
+            "extra_args": ["--cont-batching"],
+        },
+    }
+
+    created = create_model(payload)
+    assert created["role"] == "preprocessor"
+    assert created["model_name"] == ""
+    assert created["base_url"] == ""
+    assert created["params"]["ctx_size"] == 8192
+
+    loaded = get_model("tier2-preprocessor")
+    assert loaded["params"]["extra_args"] == ["--cont-batching"]

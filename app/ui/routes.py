@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -17,18 +17,12 @@ from app.models_registry import (
 )
 from app.pipelines_registry import (
     create_pipeline,
-    get_pipeline,
-    list_pipelines,
-    update_pipeline,
-
-from app.pipelines import (
-    PipelineValidationError,
     delete_pipeline,
     get_pipeline,
     list_pipelines,
-    save_pipeline,
-
+    update_pipeline,
 )
+
 from app.runs import (
     MAX_PREVIEW_BYTES,
     create_stub_run,
@@ -397,6 +391,9 @@ async def api_list_models() -> Dict[str, Any]:
 async def api_get_model(model_id: str) -> Dict[str, Any]:
     try:
         return get_model(model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
 
 @router.get("/api/pipelines")
 async def api_pipelines() -> Dict[str, Any]:
@@ -407,12 +404,9 @@ async def api_pipelines() -> Dict[str, Any]:
 async def api_create_pipeline(request: Request) -> Dict[str, Any]:
     payload = await request.json()
     try:
-        pipeline = save_pipeline(payload)
-    except PipelineValidationError as exc:
-        raise HTTPException(
-            status_code=400, detail={"message": str(exc), "errors": exc.errors}
-        ) from exc
-    return pipeline
+        return create_pipeline(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/api/pipelines/{pipeline_id}")
@@ -447,18 +441,16 @@ async def api_put_pipeline(pipeline_id: str, request: Request) -> Dict[str, Any]
         raise HTTPException(status_code=400, detail="Pipeline id mismatch")
     payload["id"] = pipeline_id
     try:
-        pipeline = save_pipeline(payload)
-    except PipelineValidationError as exc:
-        raise HTTPException(
-            status_code=400, detail={"message": str(exc), "errors": exc.errors}
-        ) from exc
-    return pipeline
+        return update_pipeline(pipeline_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/api/pipelines/{pipeline_id}")
 async def api_delete_pipeline(pipeline_id: str) -> Dict[str, Any]:
-    deleted = delete_pipeline(pipeline_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Pipeline not found")
+    try:
+        delete_pipeline(pipeline_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"deleted": True}
 
