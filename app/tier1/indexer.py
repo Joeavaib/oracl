@@ -132,3 +132,79 @@ def _config_payload(cfg: Tier1Config) -> dict[str, Any]:
         "top_k_stage1": cfg.top_k_stage1,
         "top_k_final": cfg.top_k_final,
     }
+
+
+def normalize_tokens(text: str) -> str:
+    import re
+
+    tokens = re.findall(r"\b\w+\b", text.lower())
+    return " ".join(tokens)
+
+
+def file_feature_text(file: dict[str, str]) -> str:
+    import os
+    import re
+
+    code = file["content"]
+    tokens: list[str] = []
+
+    path = file["path"]
+    for part in os.path.splitext(os.path.basename(path))[0].split("_"):
+        tokens.append(part)
+
+    tokens.extend(re.findall(r"def\s+(\w+)", code))
+    tokens.extend(re.findall(r"class\s+(\w+)", code))
+    tokens.extend(re.findall(r"import\s+(\w+)", code))
+
+    for line in code.splitlines()[:20]:
+        if "#" in line:
+            tokens.extend(re.findall(r"\b\w+\b", line))
+
+    return normalize_tokens(" ".join(tokens))
+
+
+def build_lsa_index(repo_root: str, files: list[dict[str, str]]) -> str:
+    import json
+    import os
+
+    import joblib
+    import numpy as np
+    from sklearn.decomposition import TruncatedSVD
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    from app.tier1.cache import get_cache_dir
+
+    cache_dir = get_cache_dir(repo_root)
+    corpus = [file_feature_text(file) for file in files]
+
+    if not corpus:
+        vectorizer = TfidfVectorizer(token_pattern=r"\b\w+\b")
+        tfidf = vectorizer.fit_transform(["placeholder"])
+        svd = TruncatedSVD(n_components=1)
+        index_matrix = np.zeros((0, 1), dtype=float)
+        svd.fit(tfidf)
+        joblib.dump(vectorizer, os.path.join(cache_dir, "vectorizer.joblib"))
+        joblib.dump(svd, os.path.join(cache_dir, "svd.joblib"))
+        np.save(os.path.join(cache_dir, "index.npy"), index_matrix)
+        with open(os.path.join(cache_dir, "paths.json"), "w", encoding="utf-8") as handle:
+            json.dump([], handle)
+        return cache_dir
+
+    vectorizer = TfidfVectorizer(
+        max_features=10000,
+        ngram_range=(1, 3),
+        token_pattern=r"\b\w+\b",
+    )
+    tfidf = vectorizer.fit_transform(corpus)
+
+    n_components = max(1, min(256, tfidf.shape[0] - 1 if tfidf.shape[0] > 1 else 1, tfidf.shape[1]))
+    svd = TruncatedSVD(n_components=n_components)
+    index_matrix = svd.fit_transform(tfidf)
+
+    joblib.dump(vectorizer, os.path.join(cache_dir, "vectorizer.joblib"))
+    joblib.dump(svd, os.path.join(cache_dir, "svd.joblib"))
+    np.save(os.path.join(cache_dir, "index.npy"), index_matrix)
+    with open(os.path.join(cache_dir, "paths.json"), "w", encoding="utf-8") as handle:
+        json.dump([file["path"] for file in files], handle)
+
+    return cache_dir

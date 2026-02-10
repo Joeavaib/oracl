@@ -106,6 +106,17 @@
 </section>
 
 <section class="card">
+  <h3>Tier-1 Candidates</h3>
+  <ul>
+  {% for c in tier1 %}
+    <li>{{ c.path or c.rel_path }} — score: {{ c.score }}</li>
+  {% else %}
+    <li class="hint">Keine Tier-1 Kandidaten vorhanden.</li>
+  {% endfor %}
+  </ul>
+</section>
+
+<section class="card">
   <h3>Artefakte</h3>
   <p class="hint">Vorschauen sind auf {{ max_preview_kb }} KB begrenzt. Für große Dateien den Download verwenden.</p>
   {% for name, artifact in run.artifacts.items() %}
