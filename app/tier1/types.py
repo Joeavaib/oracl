@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 def default_index_root() -> Path:
@@ -49,3 +50,22 @@ class Tier1SelectionResult:
     top_k_stage1: int
     top_k_final: int
     items: list[Tier1SelectionItem]
+
+
+@dataclass
+class FileCandidate:
+    path: str
+    score: float
+    reasons: list[str]
+    meta: dict[str, Any]
+
+
+@dataclass
+class Tier1Result:
+    query: str
+    top_k_index: int
+    top_k_final: int
+    candidates: list[FileCandidate]
+    cache_key: str
+    build_ms: float
+    search_ms: float

@@ -23,6 +23,7 @@ from app.runtime_manager import ensure_runtime
 from app.stage_runner import StageRunnerError, run_stage
 from app.tier1.config import default_tier1_config
 from app.tier1.query import select_files as tier1_select_files
+from app.tier1.search import run_tier1
 from app.validator.engine import compress_user_prompt_to_script
 from app.validator.schema import FinalValidatorLabel, OrchestraBriefing, RequestRecord
 from app.validator.runtime import validate_with_runtime
@@ -433,6 +434,19 @@ def create_run(payload: Dict[str, Any]) -> str:
         run_path / "validator_step_03_compress.json",
         _initial_orchestra_briefing(input_payload["user_prompt"]).dict(),
     )
+
+    try:
+        tier1 = run_tier1(
+            repo_root=input_payload["repo_root"],
+            goal=str(input_payload.get("goal") or ""),
+            prompt=str(input_payload.get("user_prompt") or ""),
+            constraints=input_payload.get("constraints") or [],
+        )
+        with (run_path / "tier1_candidates.json").open("w", encoding="utf-8") as handle:
+            json.dump([candidate.__dict__ for candidate in tier1.candidates], handle, ensure_ascii=False, indent=2)
+    except Exception:
+        with (run_path / "tier1_candidates.json").open("w", encoding="utf-8") as handle:
+            json.dump([], handle)
 
     append_event(run_id, RUN_CREATED, {"created_at": created_at})
 

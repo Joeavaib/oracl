@@ -170,6 +170,8 @@ def test_run_writes_pipeline_snapshots(tmp_path, monkeypatch):
     assert "hard_checks" in policy_summary
     assert "soft_checks" in policy_summary
     assert "retry_prompt" in compress_summary
+    tier1_candidates = json.loads((runs_dir / run_id / "tier1_candidates.json").read_text())
+    assert isinstance(tier1_candidates, list)
 
 
 def test_run_rejects_role_mismatch(tmp_path, monkeypatch):

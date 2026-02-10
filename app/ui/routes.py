@@ -665,6 +665,11 @@ async def run_detail(request: Request, run_id: str) -> HTMLResponse:
         run = get_run_artifacts(run_id)
         events = get_events(run_id, tail=200)
         tmp_s_views = _build_tmp_s_views(run_id)
+        tier1 = _load_json(runs_dir() / run_id / "tier1_candidates.json")
+        if isinstance(tier1, dict):
+            tier1 = tier1.get("items", [])
+        if not isinstance(tier1, list):
+            tier1 = []
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return templates.TemplateResponse(
@@ -674,6 +679,7 @@ async def run_detail(request: Request, run_id: str) -> HTMLResponse:
             "run": run,
             "events": events,
             "tmp_s_views": tmp_s_views,
+            "tier1": tier1,
             "max_preview_kb": MAX_PREVIEW_BYTES // 1024,
         },
     )
