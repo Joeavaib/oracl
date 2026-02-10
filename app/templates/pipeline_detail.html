@@ -25,7 +25,7 @@
     </label>
     <label>
       Beschreibung
-      <input type="text" name="description" value="{{ pipeline.description or \"\" }}" />
+      <input type="text" name="description" value="{{ pipeline.description or "" }}" />
     </label>
 
     <div>
@@ -42,13 +42,13 @@
           {% for step in steps %}
           <tr>
             <td>
-              <input type="text" name="step_{{ loop.index0 }}" value="{{ step.step or \"\" }}" />
+              <input type="text" name="step_{{ loop.index0 }}" value="{{ step.step or "" }}" />
             </td>
             <td>
-              <input type="text" name="role_{{ loop.index0 }}" value="{{ step.role or \"\" }}" />
+              <input type="text" name="role_{{ loop.index0 }}" value="{{ step.role or "" }}" />
             </td>
             <td>
-              <input type="text" name="model_id_{{ loop.index0 }}" value="{{ step.model_id or \"\" }}" />
+              <input type="text" name="model_id_{{ loop.index0 }}" value="{{ step.model_id or "" }}" />
             </td>
           </tr>
           {% endfor %}
